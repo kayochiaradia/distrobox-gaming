@@ -115,9 +115,7 @@ foreach ($pack in $packTargets) {
     try {
         Write-Host "[assets] downloading $($pack.Zip)"
         $zip = Get-Download -Url $url
-        [void][IO.Directory]::CreateDirectory($dest)
-        & "$env:SystemRoot\System32\tar.exe" -xf $zip -C $dest
-        if ($LASTEXITCODE -ne 0) { throw "tar.exe could not extract $($pack.Zip) (exit $LASTEXITCODE)" }
+        Expand-DgArchive -Path $zip -Destination $dest
         Set-Content -Path (Join-Path $dest '.dg-installed') -Encoding ASCII -Value "url=$url"
         Write-Host "[assets] $($pack.Zip) -> $dest" -ForegroundColor Green
     }

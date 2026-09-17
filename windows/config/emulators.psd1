@@ -42,7 +42,12 @@
 
     # --- Emulator config files -----------------------------------------------
     ConfigFiles = @(
-        # PCSX2 -- not yet verified against a live install (installer needs UAC).
+        # PCSX2 -- verified live 2026-09-17 (2.8.2) against the PCSX2.ini it
+        # writes. Dropped as already-default: InputSources SDL and
+        # SDLControllerEnhancedMode, Pad1 Type. TextureReplacementsAsync was
+        # renamed LoadTextureReplacementsAsync and defaults to true. The D-pad
+        # keys are Up/Down/Left/Right -- the Linux DPadUp/... names don't exist
+        # in PCSX2 and leave the D-pad unmapped there.
         @{ Id = 'pcsx2'; App = 'pcsx2'; Format = 'ini'
            Path = '%USERPROFILE%\Documents\PCSX2\inis\PCSX2.ini'
            Settings = @(
@@ -56,21 +61,17 @@
                @{ Section = 'EmuCore/GS'; Option = 'MaxAnisotropy'; Value = '16' }
                @{ Section = 'EmuCore/GS'; Option = 'fxaa'; Value = 'true' }
                @{ Section = 'EmuCore/GS'; Option = 'LoadTextureReplacements'; Value = 'true' }
-               @{ Section = 'EmuCore/GS'; Option = 'TextureReplacementsAsync'; Value = 'true' }
                @{ Section = 'EmuCore'; Option = 'EnableWideScreenPatches'; Value = 'true' }
                @{ Section = 'EmuCore/Speedhacks'; Option = 'fastCDVD'; Value = 'true' }
                @{ Section = 'EmuCore'; Option = 'SaveStateOnShutdown'; Value = 'true' }
-               @{ Section = 'InputSources'; Option = 'SDL'; Value = 'true' }
-               @{ Section = 'InputSources'; Option = 'SDLControllerEnhancedMode'; Value = 'true' }
-               @{ Section = 'Pad1'; Option = 'Type'; Value = 'DualShock2' }
                @{ Section = 'Pad1'; Option = 'Cross'; Value = 'SDL-0/A' }
                @{ Section = 'Pad1'; Option = 'Circle'; Value = 'SDL-0/B' }
                @{ Section = 'Pad1'; Option = 'Square'; Value = 'SDL-0/X' }
                @{ Section = 'Pad1'; Option = 'Triangle'; Value = 'SDL-0/Y' }
-               @{ Section = 'Pad1'; Option = 'DPadUp'; Value = 'SDL-0/DPadUp' }
-               @{ Section = 'Pad1'; Option = 'DPadDown'; Value = 'SDL-0/DPadDown' }
-               @{ Section = 'Pad1'; Option = 'DPadLeft'; Value = 'SDL-0/DPadLeft' }
-               @{ Section = 'Pad1'; Option = 'DPadRight'; Value = 'SDL-0/DPadRight' }
+               @{ Section = 'Pad1'; Option = 'Up'; Value = 'SDL-0/DPadUp' }
+               @{ Section = 'Pad1'; Option = 'Down'; Value = 'SDL-0/DPadDown' }
+               @{ Section = 'Pad1'; Option = 'Left'; Value = 'SDL-0/DPadLeft' }
+               @{ Section = 'Pad1'; Option = 'Right'; Value = 'SDL-0/DPadRight' }
                @{ Section = 'Pad1'; Option = 'L1'; Value = 'SDL-0/LeftShoulder' }
                @{ Section = 'Pad1'; Option = 'R1'; Value = 'SDL-0/RightShoulder' }
                @{ Section = 'Pad1'; Option = 'L2'; Value = 'SDL-0/+LeftTrigger' }
@@ -118,10 +119,10 @@
         # RetroArch -- config lives beside the exe on Windows.
         @{ Id = 'retroarch'; App = 'retroarch'; Format = 'flat'
            Path = '{dir:retroarch}\retroarch.cfg'
-           Settings = @(
-               # The Linux audio_driver=pulse override has no Windows equivalent.
-               @{ Key = 'menu_swap_ok_cancel_buttons'; Value = '"true"' }
-           ) }
+           # Verified live 2026-09-17 (1.22.2): menu_swap_ok_cancel_buttons already
+           # defaults to "true" on Windows, and there is no audio_driver override
+           # to port (Windows defaults to wasapi). Nothing global left to set.
+           Settings = @() }
 
         # Flycast -- emu.cfg only stores non-default values. Linux pvr.rend
         # (forced Vulkan) is not ported; vsync, EmulateFramebuffer and
@@ -146,6 +147,15 @@
                @{ Section = 'Global'; Option = 'FullScreen'; Value = 'true' }
                @{ Section = 'Global'; Option = 'WideScreen'; Value = 'true' }
                @{ Section = 'Global'; Option = 'WideBackground'; Value = 'true' }
+           ) }
+
+        # Model 2 Emulator -- ES-DE passes only the romset name, so the ROM
+        # folder must be set in EMULATOR.INI (ES-DE user guide). Same as the
+        # Linux m2emulator wrapper's [RomDirs].
+        @{ Id = 'm2emulator'; App = 'm2emulator'; Format = 'ini'
+           Path = '{dir:m2emulator}\EMULATOR.INI'
+           Settings = @(
+               @{ Section = 'RomDirs'; Option = 'Dir1'; Value = '{{RomPath:model2}}' }
            ) }
 
         # xemu -- BIOS/flash/HDD come straight from BiosRoot (Linux symlinks
@@ -212,6 +222,10 @@
            Settings = @( @{ Key = 'video_driver'; Value = '"glcore"' } ) }
         @{ RelativePath = 'melonDS\melonDS.opt'
            Settings = @( @{ Key = 'melonds_opengl_renderer'; Value = '"enabled"' } ) }
+        # RetroArch's Windows default video driver is d3d11; the ParaLLEl-RDP
+        # renderer below needs Vulkan (Linux used vulkan globally).
+        @{ RelativePath = 'ParaLLEl N64\ParaLLEl N64.cfg'
+           Settings = @( @{ Key = 'video_driver'; Value = '"vulkan"' } ) }
         @{ RelativePath = 'ParaLLEl N64\ParaLLEl N64.opt'
            Settings = @(
                @{ Key = 'parallel-n64-gfxplugin'; Value = '"parallel"' }

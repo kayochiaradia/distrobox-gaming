@@ -38,9 +38,12 @@ function New-TempDir {
 $apps = @(Get-DgApps -ScriptRoot $windowsRoot)
 Assert ((@($apps.id | Sort-Object -Unique)).Count -eq $apps.Count) 'apps.json ids are unique'
 foreach ($app in $apps) {
-    $ok = $app.id -and $app.name -and $app.exeNames -and ($app.source -in 'winget', 'github', 'manual')
+    $ok = $app.id -and $app.name -and $app.exeNames -and ($app.source -in 'winget', 'github', 'gitlab', 'url', 'manual')
     if ($app.source -eq 'winget') { $ok = $ok -and $app.wingetId }
     if ($app.source -eq 'github') { $ok = $ok -and $app.repo -and $app.assetPattern -and $app.installDir }
+    if ($app.source -eq 'gitlab') { $ok = $ok -and $app.project -and $app.assetPattern -and $app.installDir }
+    if ($app.source -eq 'url') { $ok = $ok -and $app.versionIndexUrl -and $app.versionRegex -and $app.urlTemplate -and $app.installDir }
+    Assert (-not $app.uac) "apps.json entry '$($app.id)' installs without Administrator rights"
     if ($app.source -eq 'manual') { $ok = $ok -and $app.installDir }
     Assert ([bool]$ok) "apps.json entry '$($app.id)' has the fields its source needs"
 }
@@ -90,6 +93,37 @@ try {
     $fakeFlycast = Join-Path $emuRoot 'flycast\flycast-win64-9.9\flycast.exe'
     New-Item -ItemType Directory -Path (Split-Path $fakeFlycast) -Force | Out-Null
     Set-Content -Path $fakeFlycast -Value 'fake'
+
+    # PS4 game with a real-format PARAM.SFO (TITLE + TITLE_ID, utf8 strings).
+    $cusa = Join-Path $romRoot 'ps4\CUSA99999'
+    New-Item -ItemType Directory -Path (Join-Path $cusa 'sce_sys') -Force | Out-Null
+    Set-Content -Path (Join-Path $cusa 'eboot.bin') -Value 'fake'
+    $keys = [Text.Encoding]::ASCII.GetBytes("TITLE`0TITLE_ID`0")
+    $v1 = [Text.Encoding]::UTF8.GetBytes("Test Game & Co`0"); $v2 = [Text.Encoding]::ASCII.GetBytes("CUSA99999`0")
+    $keyTable = 20 + 2 * 16; $dataTable = $keyTable + $keys.Length
+    $sfo = New-Object IO.MemoryStream; $w = New-Object IO.BinaryWriter($sfo)
+    $w.Write([byte[]](0, 0x50, 0x53, 0x46)); $w.Write([uint32]0x101); $w.Write([uint32]$keyTable); $w.Write([uint32]$dataTable); $w.Write([uint32]2)
+    $w.Write([uint16]0); $w.Write([uint16]0x0204); $w.Write([uint32]$v1.Length); $w.Write([uint32]$v1.Length); $w.Write([uint32]0)
+    $w.Write([uint16]6); $w.Write([uint16]0x0204); $w.Write([uint32]$v2.Length); $w.Write([uint32]$v2.Length); $w.Write([uint32]$v1.Length)
+    $w.Write($keys); $w.Write($v1); $w.Write($v2); $w.Flush()
+    [IO.File]::WriteAllBytes((Join-Path $cusa 'sce_sys\param.sfo'), $sfo.ToArray())
+
+    # Skraper arcade gamelist with a parent and a clone scraped to one name.
+    New-Item -ItemType Directory -Path (Join-Path $romRoot 'model2') -Force | Out-Null
+    Set-Content -Path (Join-Path $romRoot 'model2\gamelist.xml') -Encoding UTF8 -Value @(
+        '<gameList>',
+        '<game><path>./daytonam.zip</path><name>Daytona USA</name></game>',
+        '<game><path>./daytona.zip</path><name>Daytona USA</name><desc>Race</desc></game>',
+        '<game><path>./srallyc.zip</path><name>Sega Rally</name></game>',
+        '</gameList>')
+
+    # Skraper-flat scraped cover.
+    New-Item -ItemType Directory -Path (Join-Path $romRoot 'nes\images') -Force | Out-Null
+    Set-Content -Path (Join-Path $romRoot 'nes\images\Mario-image.png') -Value 'png'
+
+    New-Item -ItemType Directory -Path (Join-Path $esdeHome 'settings') -Force | Out-Null
+    Set-Content -Path (Join-Path $esdeHome 'settings\es_settings.xml') -Encoding UTF8 -Value @(
+        '<?xml version="1.0"?>', '<bool name="ParseGamelistOnly" value="true" />', '<string name="ROMDirectory" value="C:\old" />')
     $cfg = Join-Path $sb 'localhost.psd1'
     Set-Content -Path $cfg -Encoding UTF8 -Value @"
 @{
@@ -124,6 +158,18 @@ try {
     $after = @((Get-FileHash $findRules).Hash, (Get-FileHash $esSystems).Hash)
     $baks = @(Get-ChildItem (Join-Path $esdeHome 'custom_systems') -Filter '*.bak.*')
     Assert (($before -join '') -eq ($after -join '') -and $baks.Count -eq 0) 're-running bootstrap is idempotent and creates no backups'
+
+    [xml]$ps4List = Get-Content -Raw (Join-Path $esdeHome 'gamelists\ps4\gamelist.xml')
+    Assert ($ps4List.gameList.game.name -eq 'Test Game & Co' -and $ps4List.gameList.game.path -eq './CUSA99999/eboot.bin') 'PS4 gamelist takes the title from PARAM.SFO'
+    [xml]$arcade = Get-Content -Raw (Join-Path $esdeHome 'gamelists\model2\gamelist.xml')
+    $hidden = @($arcade.gameList.game | Where-Object { $_.hidden -eq 'true' } | ForEach-Object { $_.path })
+    Assert (($hidden -join ',') -eq './daytonam.zip') 'arcade gamelist hides the clone and keeps the parent visible'
+    $cover = Join-Path $esdeHome 'downloaded_media\nes\covers\Mario.png'
+    Assert ((Test-Path $cover) -and (Get-Content $cover) -eq 'png') 'Skraper-flat art is linked into downloaded_media'
+    $settingsText = Get-Content -Raw (Join-Path $esdeHome 'settings\es_settings.xml')
+    Assert ($settingsText -match [regex]::Escape("<string name=""ROMDirectory"" value=""$romRoot"" />") -and $settingsText -match 'ParseGamelistOnly" value="false"') 'ES-DE ROMDirectory and ParseGamelistOnly are set'
+    $gamelistBaks = @(Get-ChildItem (Join-Path $esdeHome 'gamelists') -Recurse -Filter '*.bak.*')
+    Assert ($gamelistBaks.Count -eq 0) 're-running bootstrap does not rewrite unchanged gamelists'
 
     Add-Content -Path $esSystems -Value '<!-- hand edit -->'
     & $bootstrap -Action Configure -ConfigPath $cfg | Out-Null
@@ -265,9 +311,9 @@ try {
     Assert ($duck -contains 'Keep = me') 'Configure preserves unmanaged keys'
     Assert ($duck -contains "SearchDirectory = $fxBios") 'BIOS.SearchDirectory points at an existing BiosRoot'
     Assert (@($duck | Where-Object { $_ -eq '[Main]' }).Count -eq 1) 'Configure does not duplicate existing sections'
-    Assert ((Get-Content $fxRetro) -contains 'menu_swap_ok_cancel_buttons = "true"') 'Configure updates retroarch.cfg'
     Assert ((Get-Content $fxRetro) -contains 'video_driver = "d3d11"') 'Configure leaves unmanaged retroarch.cfg keys alone'
     Assert (Test-Path (Join-Path $fx 'RetroArch-Win64\config\melonDS\melonDS.cfg')) 'Configure creates RetroArch core option files next to retroarch.cfg'
+    Assert ((Get-Content (Join-Path $fx 'RetroArch-Win64\config\ParaLLEl N64\ParaLLEl N64.cfg')) -contains 'video_driver = "vulkan"') 'ParaLLEl-N64 gets a per-core Vulkan driver override'
     Assert (-not (Test-Path $fxPcsx2)) 'Configure never creates a config file the emulator has not written yet (PCSX2)'
     Assert (@(Get-ChildItem (Split-Path $fxDuck) -Filter 'settings.ini.bak.*').Count -eq 1) 'Configure backs up a changed file once'
 

@@ -55,7 +55,13 @@ if ($List) {
             Id      = $_.id
             Name    = $_.name
             Source  = $_.source
-            From    = if ($_.wingetId) { $_.wingetId } elseif ($_.repo) { "github:$($_.repo)" } else { $_.manualUrl }
+            From    = switch ($_.source) {
+                'winget' { $_.wingetId }
+                'github' { "github:$($_.repo)" }
+                'gitlab' { "gitlab:$($_.project)" }
+                'url'    { $_.urlTemplate }
+                default  { $_.manualUrl }
+            }
             Systems = ($_.systems -join ' ')
         }
     } | Format-Table -AutoSize -Wrap
@@ -118,45 +124,65 @@ function Install-FromWinget {
     }
 }
 
-function Install-FromGitHub {
-    param($App)
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$($App.repo)/releases/latest" `
-        -Headers @{ 'User-Agent' = 'distrobox-gaming-windows' }
-    $asset = $release.assets | Where-Object { $_.name -match $App.assetPattern } | Select-Object -First 1
-    if (-not $asset) { throw "no asset matching '$($App.assetPattern)' in $($App.repo) release $($release.tag_name)" }
+$userAgent = @{ 'User-Agent' = 'distrobox-gaming-windows' }
 
+# Resolves an app's newest release to @{ Version; Url; FileName }.
+function Get-ReleaseArchive {
+    param($App)
+    switch ($App.source) {
+        'github' {
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$($App.repo)/releases/latest" -Headers $userAgent
+            $asset = $release.assets | Where-Object { $_.name -match $App.assetPattern } | Select-Object -First 1
+            if (-not $asset) { throw "no asset matching '$($App.assetPattern)' in $($App.repo) release $($release.tag_name)" }
+            return @{ Version = $release.tag_name; Url = $asset.browser_download_url; FileName = $asset.name }
+        }
+        'gitlab' {
+            $project = [Uri]::EscapeDataString($App.project)
+            $release = Invoke-RestMethod -Uri "https://gitlab.com/api/v4/projects/$project/releases/permalink/latest" -Headers $userAgent
+            $link = $release.assets.links | Where-Object { $_.name -match $App.assetPattern } | Select-Object -First 1
+            if (-not $link) { throw "no asset matching '$($App.assetPattern)' in $($App.project) release $($release.tag_name)" }
+            return @{ Version = $release.tag_name; Url = $link.url; FileName = $link.name }
+        }
+        'url' {
+            $index = (Invoke-WebRequest -Uri $App.versionIndexUrl -UseBasicParsing -Headers $userAgent).Content
+            $versions = @([regex]::Matches($index, $App.versionRegex) | ForEach-Object { [version]$_.Groups[1].Value } | Sort-Object -Descending)
+            if (-not $versions) { throw "no version matching '$($App.versionRegex)' at $($App.versionIndexUrl)" }
+            $url = $App.urlTemplate.Replace('{version}', $versions[0].ToString())
+            return @{ Version = $versions[0].ToString(); Url = $url; FileName = [IO.Path]::GetFileName(([Uri]$url).AbsolutePath) }
+        }
+    }
+    throw "source '$($App.source)' has no release archive"
+}
+
+function Install-FromArchive {
+    param($App)
+    $archive = Get-ReleaseArchive -App $App
     $dest = Join-Path $emulatorsRoot $App.installDir
     $marker = Join-Path $dest '.dg-release'
-    if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $release.tag_name)) {
-        Write-Host "    already at $($release.tag_name)" -ForegroundColor DarkGray
+    if ([IO.File]::Exists($marker) -and ([IO.File]::ReadAllText($marker).Trim() -eq $archive.Version)) {
+        Write-Host "    already at $($archive.Version)" -ForegroundColor DarkGray
         return
     }
 
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("dg-" + [Guid]::NewGuid().ToString('N') + '-' + $asset.name)
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("dg-" + [Guid]::NewGuid().ToString('N') + '-' + $archive.FileName)
     try {
-        Write-Host "    downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB, $($release.tag_name))"
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp -UseBasicParsing `
-            -Headers @{ 'User-Agent' = 'distrobox-gaming-windows' }
-        New-Item -ItemType Directory -Path $dest -Force | Out-Null
-        & "$env:SystemRoot\System32\tar.exe" -xf $tmp -C $dest
-        if ($LASTEXITCODE -ne 0) { throw "tar.exe could not extract $($asset.name) (exit $LASTEXITCODE)" }
-        Set-Content -Path $marker -Value $release.tag_name -Encoding ASCII
+        Write-Host "    downloading $($archive.FileName) ($($archive.Version))"
+        Invoke-WebRequest -Uri $archive.Url -OutFile $tmp -UseBasicParsing -Headers $userAgent
+        Expand-DgArchive -Path $tmp -Destination $dest
+        [IO.File]::WriteAllText($marker, $archive.Version)
     }
     finally {
-        Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     }
 }
 
 Write-Host "Emulators root: $emulatorsRoot" -ForegroundColor Cyan
-if ($apps | Where-Object { $_.uac }) {
-    Write-Host 'Some installers ask for Administrator approval (UAC) -- run this from an interactive window.' -ForegroundColor DarkGray
-}
 
 $failures = @()
 $manual = @()
 foreach ($app in $apps) {
     $existing = Resolve-AppRealExePath -App $app -EmulatorsRoot $emulatorsRoot
-    $refresh = $Update -and $app.source -eq 'github'
+    $refresh = $Update -and $app.source -in 'github', 'gitlab', 'url'
     if ($existing -and -not $refresh) {
         Write-Host "[skip] $($app.name): $existing" -ForegroundColor DarkGray
         continue
@@ -173,7 +199,7 @@ foreach ($app in $apps) {
     }
     try {
         if ($app.source -eq 'winget') { Install-FromWinget -App $app }
-        elseif ($app.source -eq 'github') { Install-FromGitHub -App $app }
+        elseif ($app.source -in 'github', 'gitlab', 'url') { Install-FromArchive -App $app }
         else { throw "unknown source '$($app.source)'" }
         $installed = Resolve-AppRealExePath -App $app -EmulatorsRoot $emulatorsRoot
         if (-not $installed) { throw "installer finished but none of $($app.exeNames -join ', ') was found" }

@@ -13,6 +13,11 @@
     # Not expanded as %VAR% on load -- %ROM%, %EMULATOR_X% etc. are ES-DE
     # variables.
 
+    # MAME-style arcade systems whose ROM folder has a Skraper gamelist.xml:
+    # bootstrap.ps1 generates the ES-DE gamelist with clone sets hidden
+    # (Linux dg_esde_arcade_clone_systems).
+    ArcadeCloneSystems = @('model1', 'model2', 'model3')
+
     Systems = @(
         @{ Name = 'switch'; FullName = 'Nintendo Switch'; Platform = 'switch'; Theme = 'switch'
            Extension = '.nca .NCA .nro .NRO .nso .NSO .nsp .NSP .xci .XCI'

@@ -1,7 +1,7 @@
 # Installing on Windows 10/11
 
-Run these steps on the target PC, in an **interactive** PowerShell window
-(some installers show a UAC prompt you need to approve). Reading this document
+Run these steps on the target PC in PowerShell. No Administrator rights are
+needed: every emulator is installed as a portable build. Reading this document
 installs nothing. See [README.md](README.md) for the system list and design.
 
 No ROMs, BIOS, firmware, keys or game packages are supplied.
@@ -24,9 +24,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## 2. Optional overrides
 
-Defaults need no configuration: ES-DE at `%USERPROFILE%\ES-DE`, ROMs at
-`%USERPROFILE%\ES-DE\ROMs\<system>`, emulators at `%USERPROFILE%\Emulators`,
-BIOS at `%USERPROFILE%\ES-DE\BIOS`, all on `C:`. To change any of them:
+Defaults need no configuration: emulators (including portable ES-DE) at
+`%USERPROFILE%\Emulators`, ROMs at `%USERPROFILE%\ES-DE\ROMs\<system>`, BIOS at
+`%USERPROFILE%\ES-DE\BIOS`, all on `C:`. To change any of them:
 
 ```powershell
 cd windows
@@ -53,10 +53,10 @@ RomPaths = @{
 ./install-apps.ps1 -Check    # what is installed, and where
 ```
 
-Approve the UAC prompts for ES-DE, RetroArch, PCSX2, PPSSPP and Azahar.
-Everything else installs without Administrator rights. Rerunning skips what is
-already installed; `-Only rpcs3,flycast` limits the run; `-Update` refreshes
-the GitHub-release emulators (RPCS3, Flycast, Supermodel, OpenBOR).
+Rerunning skips what is already installed; `-Only rpcs3,flycast` limits the
+run; `-Update` refreshes
+the release-based emulators (ES-DE, RetroArch, PCSX2, PPSSPP, Azahar, RPCS3,
+Flycast, Supermodel, OpenBOR).
 
 Two emulators can't be downloaded by script:
 
@@ -64,9 +64,9 @@ Two emulators can't be downloaded by script:
   [dolphin-emu.org](https://dolphin-emu.org/download/) in a browser and
   extract it so the exe is at `%USERPROFILE%\Emulators\Dolphin-x64\Dolphin.exe`.
 - **Model 2 Emulator** (Sega Model 2): place ElSemi's Model 2 Emulator so the
-  exe is at `%USERPROFILE%\Emulators\m2emulator\EMULATOR.EXE`, then set
-  `[RomDirs] Dir1=` in its `EMULATOR.INI` to your model2 ROM folder. Until
-  then, pick MAME for model2 in ES-DE.
+  exe is at `%USERPROFILE%\Emulators\m2emulator\EMULATOR.EXE`; step 7 points
+  its `EMULATOR.INI` at your model2 ROM folder. Until then, pick MAME for
+  model2 in ES-DE.
 
 ## 4. Install the RetroArch cores
 
@@ -77,7 +77,9 @@ Two emulators can't be downloaded by script:
 
 Downloads the cores for NES, SNES, Game Boy, GBA, N64, Sega 8/16/32-bit,
 Saturn, arcade, Atari and the extra systems from the libretro buildbot into
-RetroArch's `cores` folder. Existing cores are left alone unless `-Update`.
+RetroArch's `cores` folder, plus the asset packs (menus, controller autoconfig,
+cheats, databases, shaders, overlays; ~245 MB, skip with `-NoAssets`). Existing
+files are left alone unless `-Update`.
 
 ## 5. Connect everything to ES-DE
 
@@ -86,9 +88,11 @@ RetroArch's `cores` folder. Existing cores are left alone unless `-Update`.
 ./bootstrap.ps1 -Action Configure
 ```
 
-Writes `es_systems.xml` and `es_find_rules.xml` into
-`%USERPROFILE%\ES-DE\custom_systems\`. Rerun it whenever you install or move
-an emulator. To create the empty per-system ROM folders:
+Writes `es_systems.xml` and `es_find_rules.xml` into the ES-DE home's
+`custom_systems\` (inside the portable ES-DE folder, detected automatically),
+plus the PS4/arcade gamelists and scraped art, and sets ES-DE's ROM directory.
+Rerun it whenever you install or move an emulator or add games. To create the
+empty per-system ROM folders:
 
 ```powershell
 ./bootstrap.ps1 -Action Configure -CreateRomDirs $true
@@ -105,8 +109,9 @@ installed emulator -- the portable ones have no installer to do it:
 
 ## 6. First launch
 
-1. Open ES-DE. If its first-run wizard asks for a ROM directory, choose the
-   same root as `RomRoot` (default `%USERPROFILE%\ES-DE\ROMs`).
+1. Open ES-DE once (Start Menu > distrobox-gaming > ES-DE) so it creates its
+   settings, close it, and rerun `./bootstrap.ps1 -Action Configure` -- that
+   points ES-DE's ROM directory at `RomRoot`.
 2. Open each emulator you'll use once so it writes its own config, and do
    its first-run setup:
    - PCSX2, DuckStation: select your PS2/PS1 BIOS.
@@ -127,7 +132,7 @@ installed emulator -- the portable ones have no installer to do it:
 
 Applies the same graphics, widescreen and controller defaults as the Linux
 setup, minus the Linux-only ones (see
-[Emulator tuning](README.md#emulator-tuning)). Emulators that aren't installed
+[BIOS and emulator tuning](README.md#bios-and-emulator-tuning)). Emulators that aren't installed
 or haven't been opened yet are skipped. Changed files are backed up as
 `<file>.bak.<timestamp>`; copy one back to undo.
 

@@ -82,16 +82,23 @@ concerns into the Linux roles, or vice versa. See `macos/README.md`.
 `macos/`. No Ansible (no supported control node on Windows), Distrobox, WSL or
 Wine. Plain PowerShell 5.1 scripts, each with a preview mode:
 
-- `install-apps.ps1` — installs `windows/apps.json` (sources: `winget`,
-  `github` latest-release asset extracted with `tar.exe`, `manual` for sites
-  that block scripted downloads: Dolphin, Model 2 Emulator). Portable installs
-  go to `%USERPROFILE%\Emulators\<installDir>`.
+- `install-apps.ps1` — installs `windows/apps.json`, portable builds only (no
+  UAC): `winget` portable packages, `github`/`gitlab` latest-release assets,
+  `url` (version scraped from an index page, e.g. the RetroArch buildbot), and
+  `manual` for sites that block scripted downloads (Dolphin, Model 2 Emulator).
+  Installs go to `%USERPROFILE%\Emulators\<installDir>`. `.zip` is extracted
+  with .NET (Windows `tar.exe` drops non-ASCII names), `.7z`/`.rar` with `tar.exe`.
 - `install-cores.ps1` — RetroArch cores referenced in `esde-systems.psd1` plus
-  `config/retroarch-cores.psd1` extras, from the libretro buildbot.
+  `config/retroarch-cores.psd1` extras, and the 8 asset packs, from the
+  libretro buildbot.
+- `install-shortcuts.ps1` — counterpart of `desktop_apps`: Start Menu shortcuts.
 - `bootstrap.ps1` — counterpart of `configure_esde`: renders
-  `config/esde-systems.psd1` into `%USERPROFILE%\ES-DE\custom_systems\es_systems.xml`
-  and writes `es_find_rules.xml` with the resolved exe of each installed app
-  (keyed by `emulatorNames`). `%ESPATH%` is the ES-DE binary dir, so never rely
+  `config/esde-systems.psd1` into `<EsdeHome>\custom_systems\es_systems.xml`,
+  writes `es_find_rules.xml` with the resolved exe of each installed app
+  (keyed by `emulatorNames`), and ports the configure_esde Python helpers to
+  PowerShell in `lib/gamelists.ps1` (PS4 PARAM.SFO gamelist, arcade clone
+  hiding, scraped-art hard links, es_settings.xml) since Windows has no
+  Python by default. EsdeHome follows the portable ES-DE's `portable.txt`. `%ESPATH%` is the ES-DE binary dir, so never rely
   on its `Emulators\` static paths.
 - `configure-emulators.ps1` — counterpart of `seed_configs` + `gpu.yml`,
   applying `config/emulators.psd1` to files the emulator already wrote.

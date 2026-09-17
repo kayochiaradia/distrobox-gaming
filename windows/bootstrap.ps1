@@ -38,14 +38,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'lib\common.ps1')
+. (Join-Path $scriptRoot 'lib\gamelists.ps1')
 
 $apply = $Action -eq 'Configure'
 $config = Get-DgConfig -ConfigPath $ConfigPath -ScriptRoot $scriptRoot
 if ($null -ne $CreateRomDirs) { $config.CreateRomDirs = $CreateRomDirs }
 
 $apps = @(Get-DgApps -ScriptRoot $scriptRoot)
-$systems = (Import-PowerShellDataFile -Path (Join-Path $scriptRoot 'config\esde-systems.psd1')).Systems
+$esdeData = Import-PowerShellDataFile -Path (Join-Path $scriptRoot 'config\esde-systems.psd1')
+$systems = $esdeData.Systems
 $customDir = Join-Path $config.EsdeHome 'custom_systems'
+Write-Host "ES-DE home: $($config.EsdeHome)$(if ($config.EsdeHomeSource) { " ($($config.EsdeHomeSource))" })" -ForegroundColor Cyan
 
 function ConvertTo-XmlText { param([string]$Text) [Security.SecurityElement]::Escape($Text) }
 
@@ -141,6 +144,40 @@ foreach ($s in $systems) {
 }
 [void]$sb.AppendLine('</systemList>')
 Write-GeneratedFile -Path (Join-Path $customDir 'es_systems.xml') -Content $sb.ToString() -Label 'systems'
+
+# ---------------------------------------------------------------------------
+# Gamelists, scraped media and ES-DE settings (configure_esde counterparts)
+# ---------------------------------------------------------------------------
+
+Write-Host "`n== Gamelists and media ==" -ForegroundColor Cyan
+$gamelistDir = Join-Path $config.EsdeHome 'gamelists'
+$verb = if ($apply) { 'written' } else { 'would be written' }
+
+$ps4 = Update-Ps4Gamelist -RomDir (Get-RomPath -System 'ps4') -OutFile (Join-Path $gamelistDir 'ps4\gamelist.xml') -Apply $apply
+if ($null -eq $ps4) { Write-Host '[ps4] no CUSA folders with eboot.bin yet' -ForegroundColor DarkGray }
+else { Write-Host "[ps4] gamelist with $($ps4.Games) game(s) from PARAM.SFO $(if ($ps4.Changed) { $verb } else { 'up to date' })" -ForegroundColor $(if ($ps4.Changed) { 'Yellow' } else { 'Green' }) }
+
+foreach ($sys in $esdeData.ArcadeCloneSystems) {
+    $r = Update-ArcadeCloneGamelist -SourceFile (Join-Path (Get-RomPath -System $sys) 'gamelist.xml') `
+        -OutFile (Join-Path $gamelistDir "$sys\gamelist.xml") -Apply $apply
+    if ($null -eq $r) { Write-Host "[$sys] no Skraper gamelist.xml in the ROM folder" -ForegroundColor DarkGray }
+    else { Write-Host "[$sys] $($r.Games) game(s), $($r.Hidden) clone(s) hidden, $(if ($r.Changed) { $verb } else { 'up to date' })" -ForegroundColor $(if ($r.Changed) { 'Yellow' } else { 'Green' }) }
+}
+
+$romDirs = @{}
+foreach ($s in $systems) {
+    $d = Get-RomPath -System $s.Name
+    if ([IO.Directory]::Exists($d)) { $romDirs[$s.Name] = $d }
+}
+$media = Sync-EsdeMedia -SystemRomDirs $romDirs -MediaDir (Join-Path $config.EsdeHome 'downloaded_media') -Apply $apply
+Write-Host "[media] $media scraped image(s) $(if ($apply) { 'linked into' } else { 'to link into' }) downloaded_media"
+
+$esdeSettings = Set-EsdeSettings -SettingsFile (Join-Path $config.EsdeHome 'settings\es_settings.xml') -Apply $apply -Settings @(
+    @{ Type = 'string'; Name = 'ROMDirectory'; Value = $config.RomRoot }
+    @{ Type = 'bool'; Name = 'ParseGamelistOnly'; Value = ([bool]$config.ParseGamelistOnly).ToString().ToLower() }
+)
+if ($null -eq $esdeSettings) { Write-Host '[settings] es_settings.xml not created yet -- start ES-DE once, then rerun' -ForegroundColor DarkGray }
+else { Write-Host "[settings] ROMDirectory and ParseGamelistOnly $(if ($esdeSettings) { if ($apply) { 'updated' } else { 'would be updated' } } else { 'up to date' })" -ForegroundColor $(if ($esdeSettings) { 'Yellow' } else { 'Green' }) }
 
 # ---------------------------------------------------------------------------
 # ROM directories

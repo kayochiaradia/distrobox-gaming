@@ -21,14 +21,14 @@ is ES-DE's default, matching the Linux choice.
 |---|---|---|
 | Switch | Eden (Ryujinx as alternative) | winget |
 | PS1 | DuckStation (Beetle PSX cores as alternatives) | winget |
-| PS2 | PCSX2 | winget (UAC) |
+| PS2 | PCSX2 | GitHub release (portable) |
 | PS3 | RPCS3 | GitHub release |
 | PS4 | shadPS4 | winget |
-| PSP | PPSSPP | winget (UAC) |
+| PSP | PPSSPP | GitHub release (portable) |
 | PS Vita | Vita3K | winget |
 | GameCube, Wii | Dolphin | **manual download** |
 | Wii U | Cemu | winget |
-| 3DS | Azahar | winget (UAC) |
+| 3DS | Azahar | GitHub release (portable) |
 | DS | melonDS | winget |
 | Xbox | xemu | winget |
 | Xbox 360 | Xenia Canary | winget |
@@ -37,7 +37,7 @@ is ES-DE's default, matching the Linux choice.
 | Sega Model 2 | Model 2 Emulator (MAME as alternative) | **manual download** |
 | Sega Model 3 | Supermodel | GitHub release |
 | OpenBOR | OpenBOR engine | GitHub release |
-| NES, SNES, GB, GBC, GBA, N64, Master System, Genesis, Game Gear, 32X, Mega CD, Saturn, Neo Geo, CPS, CPS2, MAME, Atari 2600/5200/7800/Lynx/800/ST | RetroArch + cores | winget (UAC) + libretro buildbot |
+| NES, SNES, GB, GBC, GBA, N64, Master System, Genesis, Game Gear, 32X, Mega CD, Saturn, Neo Geo, CPS, CPS2, MAME, Atari 2600/5200/7800/Lynx/800/ST | RetroArch + cores | libretro buildbot (portable) |
 
 `install-cores.ps1` also installs the Linux tree's extra cores (Neo Geo
 Pocket, MSX, Odyssey 2, 3DO, WonderSwan, Virtual Boy, SuperGrafx, Vectrex,
@@ -51,11 +51,11 @@ and tools run natively and install through their own installers.
 ## Install and configure
 
 Step by step, with first-launch notes: [INSTALL.md](INSTALL.md). In short,
-from an interactive PowerShell window:
+from PowerShell (no Administrator rights needed):
 
 ```powershell
 cd windows
-./install-apps.ps1                       # all emulators (approve the UAC prompts)
+./install-apps.ps1                       # all emulators
 ./install-cores.ps1                      # RetroArch cores
 Copy-Item config/localhost.example.psd1 config/localhost.psd1   # optional overrides
 ./bootstrap.ps1 -Action Configure        # ES-DE systems + emulator paths
@@ -71,9 +71,9 @@ nothing, and is safe to rerun.
 
 | Script | Linux counterpart | What it does |
 |---|---|---|
-| `install-apps.ps1` | `bootstrap_packages`, `install_*` roles | Installs [apps.json](apps.json). winget portable packages and GitHub releases go to `%USERPROFILE%\Emulators\<name>` (no admin needed); installer-based packages go where their installer puts them. Skips anything already installed; `-Update` refreshes GitHub releases; `-Only` limits to some apps |
+| `install-apps.ps1` | `bootstrap_packages`, `install_*` roles | Installs [apps.json](apps.json). Everything is a portable build -- winget portable packages, GitHub/GitLab releases, the RetroArch buildbot -- installed into `%USERPROFILE%\Emulators\<name>`, so no Administrator rights are needed. Skips anything already installed; `-Update` refreshes the release-based ones; `-Only` limits to some apps |
 | `install-cores.ps1` | `retroarch_extras` | Downloads every core referenced in `esde-systems.psd1` plus the extras into RetroArch's `cores` folder, and the same 8 asset packs as Linux (info, assets, autoconfig, cheats, databases, slang shaders, overlays; ~245 MB, skip with `-NoAssets`). Never overwrites unless `-Update` |
-| `bootstrap.ps1` | `configure_esde` | Writes `%USERPROFILE%\ES-DE\custom_systems\es_systems.xml` (the 43 systems, their ROM folders and emulator order) and `es_find_rules.xml` (the real path of each installed emulator). Reports or creates ROM folders |
+| `bootstrap.ps1` | `configure_esde` | Writes `custom_systems\es_systems.xml` (the 43 systems, their ROM folders and emulator order) and `es_find_rules.xml` (the real path of each installed emulator) into the ES-DE home, generates the PS4 and arcade gamelists, links scraped art into `downloaded_media`, sets ES-DE's ROM directory, and reports or creates ROM folders |
 | `configure-emulators.ps1` | `link_storage`, `seed_configs`, `gpu.yml` | BIOS placement and emulator tuning, below |
 | `install-shortcuts.ps1` | `desktop_apps`, `install-host-launchers.sh` | Start Menu folder `distrobox-gaming` with a shortcut per installed emulator and ES-DE; removes shortcuts for apps no longer installed |
 
@@ -85,8 +85,31 @@ files are backed up as `<file>.bak.<timestamp>` before a change.
 ROM folders default to `%USERPROFILE%\ES-DE\ROMs\<system>`; override the root
 or single systems in `config/localhost.psd1`. Missing folders are only
 reported unless `CreateRomDirs` is set, so a disconnected drive never turns
-into an empty local folder. Also set ES-DE's own ROM directory to the same
-root so its bundled systems use it.
+into an empty local folder. ES-DE's own ROM directory setting is pointed at the
+same root, so its bundled systems use it too.
+
+The ES-DE home is detected: the portable release (installed by
+`install-apps.ps1`, flagged by `portable.txt`) keeps it inside its own folder,
+`%USERPROFILE%\Emulators\ES-DE\ES-DE\ES-DE`; otherwise it is
+`%USERPROFILE%\ES-DE`. Set `EsdeHome` in `config/localhost.psd1` to override.
+
+### Gamelists and scraped media
+
+Same as the Linux `configure_esde` role, ported from its Python helpers to
+PowerShell (Windows has no Python by default):
+
+- **PS4:** a gamelist built from each `CUSAxxxxx\sce_sys\param.sfo`, so games
+  show their title instead of `eboot`.
+- **Model 1/2/3:** the Skraper `gamelist.xml` in each ROM folder becomes an
+  ES-DE gamelist with MAME clone sets hidden (the shortest filename per title
+  stays visible). Like on Linux, a regenerated gamelist replaces ES-DE's own
+  favorites/play counts for those systems; the previous file is backed up.
+- **Scraped art:** Skraper/EmuDeck images (`<rom>\media\<type>\` and
+  `<rom>\images\<name>-image|-marquee.*`) are linked into ES-DE's
+  `downloaded_media` -- hard links on the same drive (Windows can't symlink
+  without Developer Mode), copies across drives. Existing files are kept.
+- **ES-DE settings:** `ROMDirectory` and `ParseGamelistOnly` (off by default,
+  as on Linux) in `es_settings.xml`, once ES-DE has created it.
 
 ## BIOS and emulator tuning
 
@@ -117,7 +140,7 @@ and Wii U keys still go through each emulator's own UI, as on Linux.
 |---|---|---|
 | PCSX2 | `%USERPROFILE%\Documents\PCSX2\inis\PCSX2.ini` | 6x upscale, 16x AF, FXAA, widescreen patches, texture replacements, fast CDVD, save state on exit, SDL Xbox-style Pad1, Select+Start/L1/R1 hotkeys |
 | DuckStation | `%LOCALAPPDATA%\DuckStation\settings.ini` | 8x resolution, JINC2 filtering, 2x MSAA, PGXP, widescreen hack, 4x CD read/seek, VSync, texture replacements |
-| RetroArch | `retroarch.cfg` + `config\<core>\` next to RetroArch | Xbox-style menu confirm/cancel; bsnes-hd widescreen, melonDS glcore, ParaLLEl-N64 Vulkan core options |
+| RetroArch | `config\<core>\` next to RetroArch | bsnes-hd widescreen; per-core video driver for melonDS (glcore) and ParaLLEl-N64 (vulkan); ParaLLEl-N64 Vulkan RDP/LLE RSP |
 | Flycast | `emu.cfg` next to Flycast | 4320p internal resolution, widescreen, duplicate frames, no delayed frame swapping |
 | Supermodel | `Config\Supermodel.ini` next to Supermodel | fullscreen (needed on Windows), widescreen, wide background |
 | xemu | `%APPDATA%\xemu\xemu\xemu.toml` | fullscreen, 3x surface scale, no welcome/update prompts |
@@ -130,11 +153,10 @@ A config file the emulator hasn't written yet is skipped, never created
 half-baked, so launch each emulator once first. Upscale values target a
 high-end discrete GPU; lower them on weaker hardware.
 
-Verified on 2026-09-17 against live installs: DuckStation 0.1-11752 (every key
-exists and differs from the Windows default), and Flycast 2.7, Supermodel
-0.3a, xemu 0.8.136, melonDS 1.1 and Cemu 2.6 (values survive an emulator
-restart). PCSX2 and RetroArch follow their installers' documented defaults and
-are not verified live yet.
+Verified on 2026-09-17 against live installs: DuckStation 0.1-11752, PCSX2
+2.8.2 and RetroArch 1.22.2 (every key exists and differs from the Windows
+default), and Flycast 2.7, Supermodel 0.3a, xemu 0.8.136, melonDS 1.1, Cemu 2.6
+and PCSX2 (values survive an emulator restart).
 
 Not ported: shadPS4's Driveclub per-game config and patch, Flycast/Supermodel
 NVRAM packs and the Cemu 8BitDo controller profile -- all built from the Linux
@@ -150,7 +172,10 @@ Settings from the Linux tree that do nothing, or the wrong thing, on Windows:
 | PCSX2 `Renderer = 14` / DuckStation `Renderer = Vulkan` | Forced Vulkan to pair with the ICD trick. On Windows, `Automatic` already picks D3D12 or Vulkan per GPU |
 | PCSX2 `UI.Language = en-US` | Fixes a missing locale inside the container. On Windows it would just force an English UI |
 | PCSX2 `CdvdPrecache`, DuckStation `LoadImageToRAM` | Read-ahead because the Linux ROMs live on a NAS over NFS. Here the ROMs are local |
-| RetroArch `audio_driver = pulse` | PulseAudio doesn't exist on Windows |
+| RetroArch `audio_driver = pulse` | PulseAudio doesn't exist on Windows (the default is `wasapi`) |
+| RetroArch `menu_swap_ok_cancel_buttons = true` | Already the Windows default |
+| PCSX2 `InputSources.SDL`, `SDLControllerEnhancedMode`, `Pad1.Type`; `TextureReplacementsAsync` | Already the default; the last one was renamed `LoadTextureReplacementsAsync` (default on) |
+| PCSX2 `Pad1.DPadUp/DPadDown/DPadLeft/DPadRight` | Not PCSX2 key names -- they are `Up/Down/Left/Right`, which Windows uses. **The Linux tree has the same bug: its D-pad binding is ignored** |
 | DuckStation `TrueColor`, `ScaledDithering`, `DisableInterlacing`, `ForceNTSCTimings`, `StartupFastBoot`, `AutoLoadCheats`, `ReadThread` | Not present in current DuckStation builds (renamed to `DitheringMode`/`DeinterlacingMode`, whose defaults already match, or removed) |
 | Values that already equal the Windows default | Writing them changes nothing |
 | DuckStation per-game GT1/GT2 overrides and cheats, Dolphin 8BitDo profiles | Specific to the Linux maintainer's own games and controller. The same mechanism exists here, empty by default |
@@ -162,20 +187,20 @@ Settings from the Linux tree that do nothing, or the wrong thing, on Windows:
 
 ## Known issues
 
-- **UAC:** the ES-DE, RetroArch, PCSX2, PPSSPP and Azahar installers need
-  Administrator approval. Run `install-apps.ps1` from an interactive window;
-  from a non-interactive session winget reports the install as cancelled.
 - **Dolphin:** dolphin-emu.org and its mirror answer `403 Forbidden` to
   scripted downloads, and winget only has the 2016 5.0 release. Download the
   current release in a browser and extract it so `Dolphin.exe` is at
   `%USERPROFILE%\Emulators\Dolphin-x64\Dolphin.exe`.
 - **Model 2 Emulator:** no official download host or release feed. Place it
   so `EMULATOR.EXE` is at `%USERPROFILE%\Emulators\m2emulator\EMULATOR.EXE`
-  and set `[RomDirs] Dir1=` in its `EMULATOR.INI` to your model2 ROM folder.
-  Meanwhile MAME is available as the alternative emulator for model2.
+  and rerun `configure-emulators.ps1`, which points its `[RomDirs]` at your
+  model2 ROM folder. Meanwhile MAME is the alternative emulator for model2.
 - **Interrupted installs:** a winget portable install that fails midway can
   leave a registration with no files. `install-apps.ps1` detects that, removes
   the orphaned registration and retries.
+- **Windows `tar.exe` and Unicode names:** it skips zip entries with non-ASCII
+  names (74 in RetroArch's `cheats.zip`), so `.zip` files are extracted with
+  .NET instead; `tar.exe` only handles `.7z`/`.rar`.
 - **Parallel Launcher** (n64 alternative emulator) is not automated; install
   it yourself if you need it.
 
@@ -194,18 +219,20 @@ brackets), idempotent and backed up before changes, that `Check` modes write
 nothing, that INI/cfg edits preserve unmanaged keys, and that folders and
 config files are only created when intended.
 
-Live-tested on 2026-09-17 on Windows 11 with an RTX 5080: RPCS3, shadPS4,
-Eden, Cemu, melonDS, xemu, Xenia Canary, Vita3K, Flycast, Supermodel, MAME,
-OpenBOR and DuckStation installed through `install-apps.ps1` (including
-`.7z`/`.rar` extraction), and `bootstrap.ps1` generated the ES-DE files for
-them. The UAC-gated apps, Dolphin and Model 2 Emulator were not installed in
-that session, and no game has been launched through ES-DE on Windows yet.
+Live-tested on 2026-09-17 on Windows 11 with an RTX 5080, without
+Administrator rights: every automated app in `apps.json` (18) installed
+through `install-apps.ps1` (winget portable, GitHub, GitLab and buildbot
+sources; `.zip`/`.7z`/`.rar`), all 38 cores and 8 asset packs through
+`install-cores.ps1`, then `bootstrap.ps1`, `configure-emulators.ps1` and
+`install-shortcuts.ps1` against them. Dolphin and Model 2 Emulator (manual
+downloads) were not installed, and no game has been launched through ES-DE on
+Windows yet.
 
 ## Architecture
 
 Keep Windows installation, commands and configuration under `windows/`. It
 shares no code with `ansible/` or `macos/`; do not fold Windows concerns into
-either. Shared helpers live in `lib/common.ps1`. `.psd1` config files use
+either. Shared helpers live in `lib/common.ps1` and `lib/gamelists.ps1`. `.psd1` config files use
 `%VAR%` placeholders, never `$env:` (`Import-PowerShellDataFile` rejects it);
 `esde-systems.psd1` is loaded without expansion because `%ROM%` and friends
 are ES-DE variables.

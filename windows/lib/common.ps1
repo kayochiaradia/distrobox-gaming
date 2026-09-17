@@ -34,13 +34,57 @@ function Get-DgConfig {
         BiosRoot            = "$env:USERPROFILE\ES-DE\BIOS"
         EmulatorsRoot       = "$env:USERPROFILE\Emulators"
         EmulatorConfigPaths = @{}
+        ParseGamelistOnly   = $false
         ConfigPath          = $ConfigPath
     }
     if (Test-Path $ConfigPath) {
         $user = Import-ConfigDataFile -Path $ConfigPath
         foreach ($k in $user.Keys) { $config[$k] = $user[$k] }
     }
+
+    # The portable ES-DE release keeps its home inside its own folder
+    # (<ES-DE dir>\ES-DE, flagged by portable.txt) instead of %USERPROFILE%\ES-DE.
+    if (-not ($user -and $user.ContainsKey('EsdeHome')) -and $ScriptRoot) {
+        $esde = Get-DgApps -ScriptRoot $ScriptRoot | Where-Object { $_.id -eq 'esde' }
+        $esdeExe = if ($esde) { Resolve-AppRealExePath -App $esde -EmulatorsRoot $config.EmulatorsRoot } else { $null }
+        if ($esdeExe -and [IO.File]::Exists((Join-Path (Split-Path -Parent $esdeExe) 'portable.txt'))) {
+            $config.EsdeHome = Join-Path (Split-Path -Parent $esdeExe) 'ES-DE'
+            $config.EsdeHomeSource = 'portable ES-DE'
+        }
+    }
     return $config
+}
+
+# Extracts an archive into $Destination, overwriting existing files. .zip goes
+# through .NET, which decodes UTF-8 entry names (Windows tar.exe skips
+# non-ASCII names, e.g. dozens of entries in RetroArch's cheats.zip); .7z and
+# .rar go through the built-in tar.exe (libarchive).
+function Expand-DgArchive {
+    param([string]$Path, [string]$Destination)
+    [void][IO.Directory]::CreateDirectory($Destination)
+    if ([IO.Path]::GetExtension($Path) -ieq '.zip') {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $root = [IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
+        $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+        try {
+            foreach ($entry in $zip.Entries) {
+                $target = [IO.Path]::GetFullPath((Join-Path $root $entry.FullName))
+                if (-not $target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "archive entry escapes the destination: $($entry.FullName)"
+                }
+                if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
+                    [void][IO.Directory]::CreateDirectory($target)
+                    continue
+                }
+                [void][IO.Directory]::CreateDirectory((Split-Path -Parent $target))
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+            }
+        }
+        finally { $zip.Dispose() }
+        return
+    }
+    & "$env:SystemRoot\System32\tar.exe" -xf $Path -C $Destination
+    if ($LASTEXITCODE -ne 0) { throw "tar.exe could not extract $([IO.Path]::GetFileName($Path)) (exit $LASTEXITCODE)" }
 }
 
 function Get-DgApps {

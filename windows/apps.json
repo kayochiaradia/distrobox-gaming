@@ -1,14 +1,14 @@
 {
-  "_comment": "Windows app list, the counterpart of the Linux packages.yml/install roles and macos/Brewfile. source=winget installs via winget (portable packages go to <EmulatorsRoot>\\<installDir>); source=github downloads the latest release asset matching assetPattern into <EmulatorsRoot>\\<installDir>; source=manual cannot be automated (the site blocks scripted downloads) and only prints instructions. emulatorNames are the ES-DE find-rule names bootstrap.ps1 writes into custom_systems\\es_find_rules.xml. uac=true means the installer asks for Administrator approval.",
+  "_comment": "Windows app list, the counterpart of the Linux packages.yml/install roles and macos/Brewfile. source=winget installs via winget (portable packages go to <EmulatorsRoot>\\<installDir>); source=github downloads the latest release asset matching assetPattern into <EmulatorsRoot>\\<installDir>; source=manual cannot be automated (the site blocks scripted downloads) and only prints instructions. emulatorNames are the ES-DE find-rule names bootstrap.ps1 writes into custom_systems\\es_find_rules.xml. Every entry installs without Administrator rights: apps with an official portable build use it (source github/gitlab/url) instead of their installer. source=gitlab reads a GitLab project's latest release links; source=url finds the newest version in versionIndexUrl with versionRegex and downloads urlTemplate.",
   "apps": [
     {
       "id": "esde", "name": "ES-DE", "role": "frontend",
-      "source": "winget", "wingetId": "ES-DE.EmulationStation-DE", "uac": true,
+      "source": "gitlab", "project": "es-de/emulationstation-de", "assetPattern": "_Portable\\.zip$", "installDir": "ES-DE",
       "exeNames": ["ES-DE.exe"], "emulatorNames": [], "systems": []
     },
     {
       "id": "retroarch", "name": "RetroArch", "role": "emulator",
-      "source": "winget", "wingetId": "Libretro.RetroArch", "uac": true,
+      "source": "url", "versionIndexUrl": "https://buildbot.libretro.com/stable/", "versionRegex": "href=\"/stable/(\\d+\\.\\d+\\.\\d+)/\"", "urlTemplate": "https://buildbot.libretro.com/stable/{version}/windows/x86_64/RetroArch.7z", "installDir": "RetroArch",
       "exeNames": ["retroarch.exe"], "emulatorNames": ["RETROARCH"],
       "registryAppPaths": ["retroarch.exe"],
       "systems": ["nes", "snes", "gb", "gbc", "gba", "n64", "mastersystem", "genesis", "gamegear", "sega32x", "megacd", "saturn", "neogeo", "cps", "cps2", "mame", "atari2600", "atari5200", "atari7800", "atarilynx", "atari800", "atarist"],
@@ -22,7 +22,7 @@
     },
     {
       "id": "pcsx2", "name": "PCSX2", "role": "emulator",
-      "source": "winget", "wingetId": "PCSX2Team.PCSX2", "uac": true,
+      "source": "github", "repo": "PCSX2/pcsx2", "assetPattern": "-windows-x64-Qt\\.7z$", "installDir": "PCSX2",
       "exeNames": ["pcsx2-qt.exe", "pcsx2-qtx64.exe", "pcsx2-qtx64-avx2.exe"], "emulatorNames": ["PCSX2"], "systems": ["ps2"]
     },
     {
@@ -32,7 +32,7 @@
     },
     {
       "id": "ppsspp", "name": "PPSSPP", "role": "emulator",
-      "source": "winget", "wingetId": "PPSSPPTeam.PPSSPP", "uac": true,
+      "source": "github", "repo": "hrydgard/ppsspp", "assetPattern": "-Windows-x64\\.zip$", "installDir": "PPSSPP",
       "exeNames": ["PPSSPPWindows64.exe"], "emulatorNames": ["PPSSPP"], "systems": ["psp"],
       "registryUninstallKey": { "path": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\PPSSPP_is1", "valueName": "InstallLocation", "exeName": "PPSSPPWindows64.exe" }
     },
@@ -60,7 +60,7 @@
     },
     {
       "id": "azahar", "name": "Azahar", "role": "emulator",
-      "source": "winget", "wingetId": "AzaharEmu.Azahar", "uac": true,
+      "source": "github", "repo": "azahar-emu/azahar", "assetPattern": "^azahar-windows-msvc-[0-9.]+\\.zip$", "installDir": "azahar",
       "exeNames": ["azahar.exe"], "emulatorNames": ["AZAHAR"], "systems": ["n3ds"]
     },
     {
