@@ -35,6 +35,63 @@ tuning, arcade Wine frontends and ROM-hack patch tooling from the Linux tree
 are not ported. They are either Linux/Wine-specific automation with no
 Windows equivalent needed (Windows games just run) or genuinely future work.
 
+Everything defaults to the `C:` drive: `%USERPROFILE%`, `%LOCALAPPDATA%` and
+the installers' own default locations.
+
+## Emulator tuning
+
+`configure-emulators.ps1` is the Windows counterpart of the Linux
+`seed_configs` role and `gpu.yml`. It applies [config/emulators.psd1](config/emulators.psd1)
+to each emulator's own config file:
+
+| Emulator | Config file | What is applied |
+|---|---|---|
+| PCSX2 | `%USERPROFILE%\Documents\PCSX2\inis\PCSX2.ini` | 6x upscale, 16x AF, FXAA, widescreen patches, texture replacements, fast CDVD, save state on exit, SDL Xbox-style Pad1, Select+Start/L1/R1 hotkeys |
+| DuckStation | `%LOCALAPPDATA%\DuckStation\settings.ini` | 8x resolution, JINC2 filtering, 2x MSAA, PGXP, widescreen hack, 4x CD read/seek, VSync, texture replacements, BIOS folder |
+| RetroArch | `C:\RetroArch-Win64\retroarch.cfg` + `config\<core>\` | Xbox-style menu confirm/cancel; bsnes-hd widescreen, melonDS glcore, ParaLLEl-N64 Vulkan core options |
+| Dolphin | `%USERPROFILE%\Documents\Dolphin Emulator\Config` | your own controller profiles, if listed |
+| GPU | `HKCU\...\DirectX\UserGpuPreferences` | "High performance" GPU per emulator, **only when the PC has more than one GPU** |
+
+A config file the emulator hasn't written yet is skipped, never created
+half-baked, so launch each emulator once first. Changed files are backed up
+as `<file>.bak.<timestamp>`. Upscale values target a high-end discrete GPU;
+lower them in `emulators.psd1` on weaker hardware.
+
+The DuckStation list was checked on 2026-09-17 against a live install
+(0.1-11752): every key exists in the `settings.ini` DuckStation writes itself
+and differs from its Windows default. The PCSX2 and RetroArch paths follow
+the installers' documented defaults but have not been verified live yet,
+because their installers need UAC approval (see [Known issues](#known-issues)).
+
+### What was not ported
+
+Settings from `ansible/group_vars/all/emulators.yml` and `gpu.yml` that do
+nothing, or the wrong thing, on Windows:
+
+| Linux setting | Why it is not on Windows |
+|---|---|
+| `VK_ICD_FILENAMES`, `--nvidia`, `lib32-nvidia-utils`, `LD_LIBRARY_PATH` | Container/Vulkan-loader workarounds for NVIDIA + AMD iGPU. Windows drivers handle this; hybrid PCs get the per-exe GPU preference instead |
+| PCSX2 `Renderer = 14` / DuckStation `Renderer = Vulkan` | Forced Vulkan to pair with the ICD trick. On Windows, `Automatic` already picks D3D12 or Vulkan per GPU |
+| PCSX2 `UI.Language = en-US` | Fixes a missing locale inside the container. On Windows it would just force an English UI |
+| PCSX2 `CdvdPrecache`, DuckStation `LoadImageToRAM` | Read-ahead because the Linux ROMs live on a NAS over NFS. Here the ROMs are on the local `C:` drive |
+| RetroArch `audio_driver = pulse` | PulseAudio doesn't exist on Windows |
+| DuckStation `TrueColor`, `ScaledDithering`, `DisableInterlacing`, `ForceNTSCTimings`, `StartupFastBoot`, `AutoLoadCheats`, `ReadThread` | Not present in current DuckStation builds (renamed to `DitheringMode`/`DeinterlacingMode`, whose defaults already match, or removed) |
+| Values that already equal the Windows default (e.g. PGXP culling, memory card type, `OptimalFramePacing`) | Writing them changes nothing |
+| DuckStation per-game GT1/GT2 overrides and cheats, Dolphin 8BitDo Ultimate 2 profiles | Specific to the Linux maintainer's own games and controller. The same mechanism exists here (`DuckstationPerGameSettings`, `DolphinControllerProfiles`), empty by default |
+| Walker `.desktop` launchers, zsh + starship, udev rules, UID/GID 1026, gamescope wrappers | Linux desktop/container plumbing. Windows installers create Start Menu shortcuts themselves |
+
+## Known issues
+
+- **UAC:** the ES-DE, PCSX2, PPSSPP and RetroArch installers require
+  Administrator approval. Run `install-apps.ps1` from a normal interactive
+  PowerShell window; from a non-interactive session the prompt can't be
+  approved and winget reports the install as cancelled. None of them offers a
+  `--scope user` installer.
+- **Dolphin 403:** as of 2026-09-17, winget's Dolphin package downloads from
+  `dl-mirror.dolphin-emu.org`, which answers `403 Forbidden`. Download Dolphin
+  from [dolphin-emu.org](https://dolphin-emu.org/download/) instead;
+  `bootstrap.ps1 -Action Configure` links it once installed.
+
 ## Install and configure
 
 For the application list and step-by-step instructions, see
@@ -49,6 +106,9 @@ Copy-Item config/localhost.example.psd1 config/localhost.psd1
 notepad config/localhost.psd1   # set your ROM paths
 ./bootstrap.ps1 -Action Check
 ./bootstrap.ps1 -Action Configure
+# launch each emulator once, then:
+./configure-emulators.ps1 -Action Check
+./configure-emulators.ps1 -Action Configure
 ```
 
 `install-apps.ps1` installs every app in [apps.json](apps.json) via `winget`;
@@ -83,12 +143,14 @@ creates) the per-system ROM directories.
 pwsh windows/tests/verify.ps1
 ```
 
-The test runs `bootstrap.ps1` for real against a temporary `EsdeHome`/
-`RomRoot` -- it never touches your actual ES-DE install. It checks
-`apps.json` shape, that `-Action Check` writes nothing, that `-Action
-Configure` creates and then idempotently re-creates the same junction, and
-that ROM directories are only created when `CreateRomDirs` is explicitly set.
-It never calls `winget` and installs nothing.
+The test runs `bootstrap.ps1` and `configure-emulators.ps1` for real against
+temporary directories and fixture config files -- it never touches your
+actual ES-DE or emulator configs, never calls `winget` and installs nothing.
+It checks `apps.json` shape, that both config data files load, that `Check`
+writes nothing, that junctions and INI/cfg edits are idempotent, that
+unmanaged keys and sections are preserved, that a config file an emulator
+hasn't written yet is never created, and that ROM directories are only
+created when `CreateRomDirs` is set.
 
 ## Architecture and next steps
 

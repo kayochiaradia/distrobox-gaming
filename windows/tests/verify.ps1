@@ -98,6 +98,73 @@ finally {
 }
 
 # ---------------------------------------------------------------------------
+# Config data files load (Import-PowerShellDataFile rejects $env: expressions)
+# ---------------------------------------------------------------------------
+
+. (Join-Path $windowsRoot 'lib\common.ps1')
+
+$example = Import-ConfigDataFile -Path (Join-Path $windowsRoot 'config\localhost.example.psd1')
+Assert ($example.EsdeHome -eq "$env:USERPROFILE\ES-DE") 'localhost.example.psd1 loads and expands %USERPROFILE%'
+$emuData = Import-ConfigDataFile -Path (Join-Path $windowsRoot 'config\emulators.psd1')
+Assert ($emuData.DuckstationIniPath -eq "$env:LOCALAPPDATA\DuckStation\settings.ini") 'emulators.psd1 loads and expands %LOCALAPPDATA%'
+
+# ---------------------------------------------------------------------------
+# configure-emulators.ps1 against fixture files
+# ---------------------------------------------------------------------------
+
+$configureScript = Join-Path $windowsRoot 'configure-emulators.ps1'
+$fx = Join-Path ([System.IO.Path]::GetTempPath()) ("dg-windows-emu-" + [System.Guid]::NewGuid().ToString('N'))
+$fxDuck = Join-Path $fx 'DuckStation\settings.ini'
+$fxRetro = Join-Path $fx 'RetroArch-Win64\retroarch.cfg'
+$fxPcsx2 = Join-Path $fx 'PCSX2\inis\PCSX2.ini'
+$fxBios = Join-Path $fx 'BIOS'
+New-Item -ItemType Directory -Path (Split-Path $fxDuck), (Split-Path $fxRetro), $fxBios -Force | Out-Null
+Set-Content -Path $fxDuck -Value @('[Main]', 'ConfirmPowerOff = true', '', '[GPU]', 'ResolutionScale = 1', 'Keep = me') -Encoding UTF8
+Set-Content -Path $fxRetro -Value @('menu_swap_ok_cancel_buttons = "false"', 'video_driver = "d3d11"') -Encoding UTF8
+$fxConfig = Join-Path $fx 'localhost.psd1'
+Set-Content -Path $fxConfig -Encoding UTF8 -Value @"
+@{
+    BiosRoot = '$fxBios'
+    PreferDiscreteGpu = `$false
+    EmulatorConfigPaths = @{
+        pcsx2 = '$fxPcsx2'
+        duckstation = '$fxDuck'
+        retroarch = '$fxRetro'
+    }
+}
+"@
+
+try {
+    $duckHash = (Get-FileHash $fxDuck).Hash
+    & $configureScript -Action Check -ConfigPath $fxConfig | Out-Null
+    Assert ((Get-FileHash $fxDuck).Hash -eq $duckHash) 'configure-emulators -Action Check writes nothing'
+    Assert (-not (Test-Path (Join-Path $fx 'RetroArch-Win64\config'))) 'Check does not create RetroArch core option files'
+
+    & $configureScript -Action Configure -ConfigPath $fxConfig | Out-Null
+    $duck = Get-Content $fxDuck
+    Assert ($duck -contains 'ConfirmPowerOff = false') 'Configure updates an existing INI key in place'
+    Assert ($duck -contains 'ResolutionScale = 8') 'Configure updates a key in a later section'
+    Assert ($duck -contains 'Keep = me') 'Configure preserves unmanaged keys'
+    Assert ($duck -contains "SearchDirectory = $fxBios") 'BIOS.SearchDirectory points at an existing BiosRoot'
+    Assert (@($duck | Where-Object { $_ -eq '[Main]' }).Count -eq 1) 'Configure does not duplicate existing sections'
+    Assert ((Get-Content $fxRetro) -contains 'menu_swap_ok_cancel_buttons = "true"') 'Configure updates retroarch.cfg'
+    Assert ((Get-Content $fxRetro) -contains 'video_driver = "d3d11"') 'Configure leaves unmanaged retroarch.cfg keys alone'
+    Assert (Test-Path (Join-Path $fx 'RetroArch-Win64\config\melonDS\melonDS.cfg')) 'Configure creates RetroArch core option files next to retroarch.cfg'
+    Assert (-not (Test-Path $fxPcsx2)) 'Configure never creates a config file the emulator has not written yet (PCSX2)'
+    Assert (@(Get-ChildItem (Split-Path $fxDuck) -Filter 'settings.ini.bak.*').Count -eq 1) 'Configure backs up a changed file once'
+
+    $duckHash = (Get-FileHash $fxDuck).Hash
+    $retroHash = (Get-FileHash $fxRetro).Hash
+    Start-Sleep -Seconds 1
+    & $configureScript -Action Configure -ConfigPath $fxConfig | Out-Null
+    Assert (((Get-FileHash $fxDuck).Hash -eq $duckHash) -and ((Get-FileHash $fxRetro).Hash -eq $retroHash)) 'Re-running configure-emulators is idempotent'
+    Assert (@(Get-ChildItem (Split-Path $fxDuck) -Filter 'settings.ini.bak.*').Count -eq 1) 'Idempotent re-run creates no new backup'
+}
+finally {
+    Remove-Item -Path $fx -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
 # Result
 # ---------------------------------------------------------------------------
 

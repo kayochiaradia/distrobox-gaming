@@ -50,6 +50,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptRoot 'lib\common.ps1')
 
 # ---------------------------------------------------------------------------
 # Load config
@@ -66,7 +67,7 @@ $config = @{
 }
 
 if (Test-Path $ConfigPath) {
-    $userConfig = Import-PowerShellDataFile -Path $ConfigPath
+    $userConfig = Import-ConfigDataFile -Path $ConfigPath
     foreach ($key in $userConfig.Keys) { $config[$key] = $userConfig[$key] }
     Write-Verbose "Loaded overrides from $ConfigPath"
 }
@@ -87,89 +88,6 @@ $manifest = Get-Content -Raw -Path $appsJsonPath | ConvertFrom-Json
 $apps = $manifest.apps
 
 # ---------------------------------------------------------------------------
-# Detection helpers
-# ---------------------------------------------------------------------------
-
-function Test-OnPath {
-    param([string[]]$ExeNames)
-    foreach ($exe in $ExeNames) {
-        if (Get-Command $exe -ErrorAction SilentlyContinue) { return $true }
-    }
-    return $false
-}
-
-function Test-AppPathsRegistry {
-    param([string[]]$ExeNames)
-    $roots = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths',
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths'
-    )
-    foreach ($root in $roots) {
-        foreach ($exe in $ExeNames) {
-            $keyPath = Join-Path $root $exe
-            if (Test-Path $keyPath) { return $true }
-        }
-    }
-    return $false
-}
-
-function Test-UninstallKey {
-    param($UninstallKey)
-    if (-not $UninstallKey) { return $false }
-    foreach ($hive in @('HKLM:', 'HKCU:')) {
-        $keyPath = Join-Path $hive $UninstallKey.path
-        if (-not (Test-Path $keyPath)) { continue }
-        $installLoc = (Get-ItemProperty -Path $keyPath -ErrorAction SilentlyContinue).($UninstallKey.valueName)
-        if ($installLoc -and (Test-Path (Join-Path $installLoc $UninstallKey.exeName))) { return $true }
-    }
-    return $false
-}
-
-function Get-EsdeJunctionPath {
-    param($App, [string]$EsdeHome)
-    if (-not $App.esdeEmulatorDir) { return $null }
-    return Join-Path (Join-Path $EsdeHome 'Emulators') $App.esdeEmulatorDir
-}
-
-function Test-EsdeJunctionResolves {
-    param($App, [string]$EsdeHome)
-    $junctionPath = Get-EsdeJunctionPath -App $App -EsdeHome $EsdeHome
-    if (-not $junctionPath -or -not (Test-Path $junctionPath)) { return $false }
-    foreach ($exe in $App.exeNames) {
-        if (Get-ChildItem -Path $junctionPath -Filter $exe -ErrorAction SilentlyContinue) { return $true }
-    }
-    return $false
-}
-
-function Test-AppDetected {
-    param($App, [string]$EsdeHome)
-    if (Test-OnPath -ExeNames $App.exeNames) { return $true }
-    if ($App.registryAppPaths -and (Test-AppPathsRegistry -ExeNames $App.registryAppPaths)) { return $true }
-    if (Test-UninstallKey -UninstallKey $App.registryUninstallKey) { return $true }
-    if (Test-EsdeJunctionResolves -App $App -EsdeHome $EsdeHome) { return $true }
-    return $false
-}
-
-function Find-InstalledExe {
-    param($App)
-    $roots = @(
-        $env:ProgramFiles,
-        ${env:ProgramFiles(x86)},
-        (Join-Path $env:LOCALAPPDATA 'Programs'),
-        (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
-    ) | Where-Object { $_ -and (Test-Path $_) }
-
-    foreach ($root in $roots) {
-        foreach ($exe in $App.exeNames) {
-            $hit = Get-ChildItem -Path $root -Recurse -Depth 4 -Filter $exe -File -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-            if ($hit) { return $hit.Directory.FullName }
-        }
-    }
-    return $null
-}
-
-# ---------------------------------------------------------------------------
 # Emulator detection / junction wiring
 # ---------------------------------------------------------------------------
 
@@ -186,7 +104,8 @@ foreach ($app in $apps) {
 
     if (-not $detected -and $app.esdeEmulatorDir) {
         if ($Action -eq 'Configure') {
-            $foundDir = Find-InstalledExe -App $app
+            $foundExe = Find-InstalledExe -App $app
+            $foundDir = if ($foundExe) { Split-Path -Parent $foundExe } else { $null }
             if ($foundDir) {
                 $junctionPath = Get-EsdeJunctionPath -App $app -EsdeHome $esdeHome
                 $emulatorsDir = Split-Path -Parent $junctionPath

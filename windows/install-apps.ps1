@@ -79,6 +79,24 @@ if ($Check) {
 }
 
 Write-Host "Installing $($apps.Count) app(s) via winget..." -ForegroundColor Cyan
+Write-Host "Several of these installers require Administrator elevation (a UAC prompt)." -ForegroundColor DarkGray
+Write-Host "Run this script from a normal interactive PowerShell window so you can approve it.`n" -ForegroundColor DarkGray
+
+# Known winget/installer failure signatures, and the actionable hint to print
+# for each. winget's own error text varies by installer technology
+# (Inno Setup vs NSIS vs MSI) but these substrings are stable across runs --
+# confirmed against real failures on 2026-09-17 (ES-DE, PCSX2, PPSSPP,
+# RetroArch all hit the elevation case; Dolphin hit the mirror case).
+$knownFailures = @(
+    @{
+        Match = 'canceled by the user|You cancelled the installation|ERROR_INSTALL_USERCANCEL'
+        Hint  = "requires Administrator elevation (UAC) that couldn't be approved in this session -- rerun this script from an interactive PowerShell window and accept the UAC prompt."
+    },
+    @{
+        Match = 'Forbidden \(403\)|Download request status is not success'
+        Hint  = "the upstream download mirror refused the request (HTTP 403). This is not a winget/script bug -- retry later, or download it manually from the project's own site."
+    }
+)
 
 $failures = @()
 foreach ($app in $apps) {
@@ -87,16 +105,25 @@ foreach ($app in $apps) {
         continue
     }
     Write-Host "[install] $($app.name) ($($app.wingetId))" -ForegroundColor Cyan
-    winget install --id $app.wingetId --exact --silent `
-        --accept-package-agreements --accept-source-agreements --source winget
+    $output = & winget install --id $app.wingetId --exact --silent `
+        --accept-package-agreements --accept-source-agreements --source winget 2>&1
+    $output | ForEach-Object { Write-Host $_ }
+
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "[FAILED] $($app.name) exited with code $LASTEXITCODE" -ForegroundColor Red
+        $outputText = $output -join "`n"
+        $hint = ($knownFailures | Where-Object { $outputText -match $_.Match } | Select-Object -First 1).Hint
+        if ($hint) {
+            Write-Host "[FAILED] $($app.name): $hint" -ForegroundColor Red
+        } else {
+            Write-Host "[FAILED] $($app.name) exited with code $LASTEXITCODE" -ForegroundColor Red
+        }
         $failures += $app.name
     }
 }
 
 if ($failures) {
     Write-Host "`nFailed to install: $($failures -join ', ')" -ForegroundColor Red
+    Write-Host "Rerun ./install-apps.ps1 after addressing the above -- already-installed apps are skipped." -ForegroundColor Yellow
     exit 1
 }
 

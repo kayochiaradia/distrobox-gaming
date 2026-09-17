@@ -51,6 +51,13 @@ This reads [apps.json](apps.json) and runs `winget install` for each entry,
 skipping anything already installed. It never removes packages that aren't
 on the list.
 
+Run it from a normal interactive PowerShell window: the ES-DE, PCSX2, PPSSPP
+and RetroArch installers show a UAC prompt you have to approve. If Dolphin
+fails with `403 Forbidden`, its winget mirror is refusing downloads -- get it
+from [dolphin-emu.org](https://dolphin-emu.org/download/) instead (see
+[Known issues](README.md#known-issues)). Rerunning the script skips whatever
+already installed.
+
 ### Inspecting the list
 
 ```powershell
@@ -72,24 +79,32 @@ if (-not (Test-Path windows/config/localhost.psd1)) {
 }
 ```
 
-Edit it with your ROM library root and, if you have a split library, per-system
-overrides:
+Everything in this baseline defaults to the `C:` drive -- `%USERPROFILE%`,
+`%LOCALAPPDATA%` and the standard installer locations (`C:\Program Files`,
+`C:\RetroArch-Win64`, ...) are all on `C:` on a normal single-drive Windows
+install. Only add a `D:`/other-drive path here if you deliberately keep ROMs
+or an emulator install somewhere else:
 
 ```powershell
 @{
-    EsdeHome = "$env:USERPROFILE\ES-DE"
-    RomRoot  = "D:\Games\roms"
+    EsdeHome = '%USERPROFILE%\ES-DE'
+    RomRoot  = '%USERPROFILE%\ES-DE\ROMs'
     RomPaths = @{
-        ps2 = '\\NAS\Games\roms\ps2'
+        # ps2 = '\\NAS\Games\roms\ps2'
     }
     CreateRomDirs = $false
+    BiosRoot = '%USERPROFILE%\ES-DE\BIOS'
 }
 ```
 
-The default `RomRoot` is `%USERPROFILE%\ES-DE\ROMs`, matching what ES-DE's
-own first-run wizard suggests. Missing directories are only reported, never
-created -- a disconnected network or USB drive must not silently become an
-empty local folder. Set `CreateRomDirs = $true` explicitly to opt in to
+Use `%USERPROFILE%`-style placeholders, not `$env:USERPROFILE`: PowerShell
+data files can't evaluate `$env:` expressions, and the scripts expand the
+`%...%` form when they load the file.
+
+The default `RomRoot` is `%USERPROFILE%\ES-DE\ROMs` (on `C:`), matching what
+ES-DE's own first-run wizard suggests. Missing directories are only reported,
+never created -- a disconnected network or USB drive must not silently become
+an empty local folder. Set `CreateRomDirs = $true` explicitly to opt in to
 creating missing local directories.
 
 ## 4. Review and apply
@@ -121,10 +136,30 @@ junction under `Emulators\` to undo it.
    `ROMs\ps2`, ...) and launch one game per system. Check video, audio,
    controller input, clean exit, and saving/loading.
 
-This phase automates installation and emulator discovery. BIOS, controllers
-and graphics settings are still configured inside each emulator, and the
-automated test in `tests/verify.ps1` is no substitute for testing with real
-games.
+## 6. Apply emulator tuning
+
+After each emulator has been opened once (so it has written its own config
+file):
+
+```powershell
+./configure-emulators.ps1 -Action Check
+./configure-emulators.ps1 -Action Configure
+```
+
+This applies the same graphics, widescreen and controller defaults the Linux
+setup uses, minus the Linux-only ones -- see
+[Emulator tuning](README.md#emulator-tuning) for the full list and what was
+deliberately left out. Emulators that aren't installed or haven't been opened
+yet are skipped. Changed files are backed up as `<file>.bak.<timestamp>`;
+copy one back over the original to undo.
+
+**BIOS:** if you create `BiosRoot` (default `%USERPROFILE%\ES-DE\BIOS`) and
+put your PS1 BIOS there, DuckStation is pointed at it. If the folder doesn't
+exist, DuckStation keeps its own `%LOCALAPPDATA%\DuckStation\bios` folder.
+PCSX2 asks for its BIOS folder in its first-run wizard.
+
+The automated test in `tests/verify.ps1` is no substitute for testing with
+real games.
 
 ## Verification
 
@@ -132,9 +167,10 @@ games.
 pwsh windows/tests/verify.ps1
 ```
 
-Runs `bootstrap.ps1` for real against a temporary sandbox directory, never
-against your actual `%USERPROFILE%\ES-DE`. It never calls `winget` and
-installs nothing. See [README.md](README.md#verification) for what it checks.
+Runs `bootstrap.ps1` and `configure-emulators.ps1` for real against temporary
+directories and fixture config files, never against your actual ES-DE or
+emulator configs. It never calls `winget` and installs nothing. See
+[README.md](README.md#verification) for what it checks.
 
 See [README.md](README.md) for architecture, scope boundaries, and how to add
 more emulators from the `future` list.
