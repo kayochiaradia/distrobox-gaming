@@ -203,6 +203,62 @@ finally {
 }
 
 # ---------------------------------------------------------------------------
+# backup.ps1 / restore.ps1 round trip, verify-setup.ps1
+# ---------------------------------------------------------------------------
+
+$bk = New-TempDir
+try {
+    $bkData = Join-Path $bk 'data'
+    $bkDir = Join-Path $bk 'backups'
+    New-Item -ItemType Directory -Path (Join-Path $bkData 'emu\cache'), (Join-Path $bkData 'emu\sub') -Force | Out-Null
+    Set-Content -Path (Join-Path $bkData 'emu\settings.ini') -Value 'original'
+    Set-Content -Path (Join-Path $bkData 'emu\sub\profile.ini') -Value 'profile'
+    Set-Content -Path (Join-Path $bkData 'emu\cache\big.bin') -Value 'cache'
+    Set-Content -Path (Join-Path $bkData 'single.toml') -Value 'single'
+    $bkMaint = Join-Path $bk 'maintenance.psd1'
+    Set-Content -Path $bkMaint -Encoding UTF8 -Value @"
+@{
+    BackupDir = '$bkDir'
+    BackupItems = @(
+        @{ Name = 'emu'; Path = '$(Join-Path $bkData 'emu')'; Exclude = @('cache') }
+        @{ Name = 'single'; Path = '$(Join-Path $bkData 'single.toml')' }
+        @{ Name = 'absent'; Path = '$(Join-Path $bkData 'nope')' }
+    )
+}
+"@
+    $bkCfg = Join-Path $bk 'localhost.psd1'
+    Set-Content -Path $bkCfg -Encoding UTF8 -Value "@{ EmulatorsRoot = '$(Join-Path $bk 'Emulators')'; EsdeHome = '$(Join-Path $bk 'ES-DE')' }"
+
+    & (Join-Path $windowsRoot 'backup.ps1') -ConfigPath $bkCfg -MaintenanceConfigPath $bkMaint | Out-Null
+    $zips = @(Get-ChildItem $bkDir -Filter '*.zip')
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $z = [IO.Compression.ZipFile]::OpenRead($zips[0].FullName)
+    $names = @($z.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }); $z.Dispose()
+    Assert ($zips.Count -eq 1 -and ($names -contains 'emu/sub/profile.ini') -and ($names -contains 'single/single.toml')) 'backup archives files and folders'
+    Assert (-not ($names -match 'cache')) 'backup honours excludes'
+
+    Set-Content -Path (Join-Path $bkData 'emu\settings.ini') -Value 'broken'
+    Remove-Item -Path (Join-Path $bkData 'single.toml')
+    Set-Content -Path (Join-Path $bkData 'emu\new-file.ini') -Value 'keep me'
+
+    & (Join-Path $windowsRoot 'restore.ps1') -Latest -ConfigPath $bkCfg -MaintenanceConfigPath $bkMaint | Out-Null
+    Assert ((Get-Content (Join-Path $bkData 'emu\settings.ini')) -eq 'broken') 'restore -Action Check writes nothing'
+
+    Start-Sleep -Seconds 1
+    & (Join-Path $windowsRoot 'restore.ps1') -Latest -Action Configure -ConfigPath $bkCfg -MaintenanceConfigPath $bkMaint | Out-Null
+    Assert ((Get-Content (Join-Path $bkData 'emu\settings.ini')) -eq 'original') 'restore puts backed-up files back'
+    Assert ((Get-Content (Join-Path $bkData 'single.toml')) -eq 'single') 'restore recreates deleted single-file items'
+    Assert (Test-Path (Join-Path $bkData 'emu\new-file.ini')) 'restore leaves files that were not in the backup alone'
+    Assert (@(Get-ChildItem $bkDir -Filter '*.zip').Count -eq 2) 'restore takes a safety backup of the current state first'
+
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsRoot 'verify-setup.ps1') -ConfigPath $bkCfg -ShortcutsDir (Join-Path $bk 'none') *> $null
+    Assert ($LASTEXITCODE -eq 1) 'verify-setup exits 1 when apps and ES-DE files are missing'
+}
+finally {
+    Remove-Item -Path $bk -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
 # install-shortcuts.ps1
 # ---------------------------------------------------------------------------
 

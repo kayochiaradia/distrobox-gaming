@@ -119,11 +119,7 @@ Write-GeneratedFile -Path (Join-Path $customDir 'es_find_rules.xml') -Content $s
 # es_systems.xml
 # ---------------------------------------------------------------------------
 
-function Get-RomPath {
-    param([string]$System)
-    if ($config.RomPaths -and $config.RomPaths.ContainsKey($System)) { return $config.RomPaths[$System] }
-    return Join-Path $config.RomRoot $System
-}
+function Get-RomPath { param([string]$System) Get-DgRomPath -System $System -Config $config }
 
 $sb = New-Object Text.StringBuilder
 [void]$sb.AppendLine('<?xml version="1.0"?>')

@@ -92,6 +92,10 @@ Wine. Plain PowerShell 5.1 scripts, each with a preview mode:
   `config/retroarch-cores.psd1` extras, and the 8 asset packs, from the
   libretro buildbot.
 - `install-shortcuts.ps1` — counterpart of `desktop_apps`: Start Menu shortcuts.
+- `site.ps1`, `reset-configs.ps1`, `backup.ps1`, `restore.ps1`, `verify-setup.ps1`
+  — counterparts of `site.yml`, `reset-configs.yml`, `backup.yml`, `restore.yml`
+  and the `verify` role. Backups are config-only zips driven by
+  `config/maintenance.psd1` (no container image on Windows).
 - `bootstrap.ps1` — counterpart of `configure_esde`: renders
   `config/esde-systems.psd1` into `<EsdeHome>\custom_systems\es_systems.xml`,
   writes `es_find_rules.xml` with the resolved exe of each installed app

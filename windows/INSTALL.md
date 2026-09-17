@@ -159,6 +159,20 @@ Launch one game per system from ES-DE and check video, audio, controller
 input, clean exit, and saving/loading. The automated tests are no substitute
 for that.
 
+## Shortcut: everything at once
+
+Steps 3 to 7 in one command, and a final check:
+
+```powershell
+./site.ps1
+```
+
+Run it again after opening each emulator once, so their settings get applied.
+Later on: `./verify-setup.ps1` checks the installation, `./backup.ps1` /
+`./restore.ps1 -Latest -Action Configure` save and restore your configuration,
+and `./reset-configs.ps1` puts the managed settings back. See
+[Maintenance](README.md#maintenance).
+
 ## Verification
 
 ```powershell

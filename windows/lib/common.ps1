@@ -92,6 +92,46 @@ function Get-DgApps {
     return (Get-Content -Raw -Path (Join-Path $ScriptRoot 'apps.json') | ConvertFrom-Json).apps
 }
 
+# Token expansion shared by the config-driven scripts. Returns $null when a
+# {dir:<app>} token names an app that isn't installed.
+#   {dir:<app id>}      folder of that app's installed exe
+#   {esdehome}          detected ES-DE home
+#   {scriptroot}        the windows/ folder
+#   {{BiosRoot}}        BiosRoot
+#   {{RomPath:<sys>}}   RomPaths override or RomRoot\<sys>
+$script:DgAppDirCache = @{}
+function Get-DgAppDir {
+    param([string]$Id, $Config, $Apps)
+    if (-not $script:DgAppDirCache.ContainsKey($Id)) {
+        $app = $Apps | Where-Object { $_.id -eq $Id }
+        $exe = if ($app) { Resolve-AppRealExePath -App $app -EmulatorsRoot $Config.EmulatorsRoot } else { $null }
+        $script:DgAppDirCache[$Id] = if ($exe) { Split-Path -Parent $exe } else { $null }
+    }
+    return $script:DgAppDirCache[$Id]
+}
+
+function Get-DgRomPath {
+    param([string]$System, $Config)
+    if ($Config.RomPaths -and $Config.RomPaths.ContainsKey($System)) { return $Config.RomPaths[$System] }
+    return Join-Path $Config.RomRoot $System
+}
+
+function Expand-DgTokens {
+    param([string]$Text, $Config, $Apps, [string]$ScriptRoot)
+    $out = $Text
+    foreach ($m in [regex]::Matches($Text, '\{dir:([a-z0-9]+)\}')) {
+        $dir = Get-DgAppDir -Id $m.Groups[1].Value -Config $Config -Apps $Apps
+        if (-not $dir) { return $null }
+        $out = $out.Replace($m.Value, $dir)
+    }
+    foreach ($m in [regex]::Matches($out, '\{\{RomPath:([a-z0-9]+)\}\}')) {
+        $out = $out.Replace($m.Value, (Get-DgRomPath -System $m.Groups[1].Value -Config $Config))
+    }
+    $out = $out.Replace('{{BiosRoot}}', $Config.BiosRoot).Replace('{esdehome}', $Config.EsdeHome)
+    if ($ScriptRoot) { $out = $out.Replace('{scriptroot}', $ScriptRoot) }
+    return $out
+}
+
 function Get-PathExe {
     param([string[]]$ExeNames)
     foreach ($exe in $ExeNames) {

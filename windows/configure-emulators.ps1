@@ -49,37 +49,8 @@ $apps = @(Get-DgApps -ScriptRoot $scriptRoot)
 # Tokens
 # ---------------------------------------------------------------------------
 
-$script:AppDirCache = @{}
-function Get-AppDir {
-    param([string]$Id)
-    if (-not $script:AppDirCache.ContainsKey($Id)) {
-        $app = $apps | Where-Object { $_.id -eq $Id }
-        $exe = if ($app) { Resolve-AppRealExePath -App $app -EmulatorsRoot $config.EmulatorsRoot } else { $null }
-        $script:AppDirCache[$Id] = if ($exe) { Split-Path -Parent $exe } else { $null }
-    }
-    return $script:AppDirCache[$Id]
-}
-
-function Get-RomPath {
-    param([string]$System)
-    if ($config.RomPaths -and $config.RomPaths.ContainsKey($System)) { return $config.RomPaths[$System] }
-    return Join-Path $config.RomRoot $System
-}
-
-# Returns $null when a {dir:app} token names an app that isn't installed.
-function Expand-Tokens {
-    param([string]$Text)
-    $out = $Text
-    foreach ($m in [regex]::Matches($Text, '\{dir:([a-z0-9]+)\}')) {
-        $dir = Get-AppDir -Id $m.Groups[1].Value
-        if (-not $dir) { return $null }
-        $out = $out.Replace($m.Value, $dir)
-    }
-    foreach ($m in [regex]::Matches($out, '\{\{RomPath:([a-z0-9]+)\}\}')) {
-        $out = $out.Replace($m.Value, (Get-RomPath -System $m.Groups[1].Value))
-    }
-    return $out.Replace('{{BiosRoot}}', $config.BiosRoot)
-}
+function Get-AppDir { param([string]$Id) Get-DgAppDir -Id $Id -Config $config -Apps $apps }
+function Expand-Tokens { param([string]$Text) Expand-DgTokens -Text $Text -Config $config -Apps $apps -ScriptRoot $scriptRoot }
 
 # ---------------------------------------------------------------------------
 # File helpers (mirror community.general.ini_file / lineinfile / backup: true)

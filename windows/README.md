@@ -64,8 +64,21 @@ Copy-Item config/localhost.example.psd1 config/localhost.psd1   # optional overr
 ./configure-emulators.ps1 -Action Configure
 ```
 
+Or all of it in one go, like `ansible-playbook site.yml`: `./site.ps1`
+(`-Tags install,cores,esde,desktop,configs,verify` to run a subset).
+
 Every script accepts a preview mode (`-Check` or `-Action Check`) that writes
 nothing, and is safe to rerun.
+
+### Maintenance
+
+| Script | Linux counterpart | What it does |
+|---|---|---|
+| `site.ps1` | `site.yml` | Full setup: install, cores, ES-DE, shortcuts, emulator configs, verify |
+| `reset-configs.ps1` | `reset-configs.yml` | Re-applies managed settings without reinstalling (`-Tags configs,desktop,esde,verify`); changed files are backed up first |
+| `backup.ps1` | `backup.yml` | Zips emulator and ES-DE configuration to `%USERPROFILE%\distrobox-gaming-backups` (list with `-List`). No container image to snapshot on Windows -- emulators are reinstalled by `install-apps.ps1` -- so only configs are archived, with the Linux exclusions (caches, shaders, screenshots, logs, saves, states) plus BIOS and ROMs. Items are in [config/maintenance.psd1](config/maintenance.psd1) |
+| `restore.ps1` | `restore.yml` | `-Latest` or `-Timestamp`, previewed by default, `-Action Configure` to write. Backs up the current state first, overwrites archived files, leaves other files alone |
+| `verify-setup.ps1` | `verify` role | Asserts every automated app is installed, the ES-DE files are valid and point at the installed emulators, RetroArch has every core ES-DE needs, and shortcuts exist; warns about missing manual apps, BiosRoot and shadPS4 firmware. Exits 1 on failure |
 
 ### How it fits together
 
