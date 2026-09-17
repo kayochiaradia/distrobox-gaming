@@ -59,6 +59,7 @@ cd windows
 ./install-cores.ps1                      # RetroArch cores
 Copy-Item config/localhost.example.psd1 config/localhost.psd1   # optional overrides
 ./bootstrap.ps1 -Action Configure        # ES-DE systems + emulator paths
+./install-shortcuts.ps1 -Action Configure  # Start Menu shortcuts
 # open each emulator once, then:
 ./configure-emulators.ps1 -Action Configure
 ```
@@ -73,7 +74,8 @@ nothing, and is safe to rerun.
 | `install-apps.ps1` | `bootstrap_packages`, `install_*` roles | Installs [apps.json](apps.json). winget portable packages and GitHub releases go to `%USERPROFILE%\Emulators\<name>` (no admin needed); installer-based packages go where their installer puts them. Skips anything already installed; `-Update` refreshes GitHub releases; `-Only` limits to some apps |
 | `install-cores.ps1` | `retroarch_extras` | Downloads every core referenced in `esde-systems.psd1` plus the extras, into RetroArch's `cores` folder. Never overwrites an existing core unless `-Update` |
 | `bootstrap.ps1` | `configure_esde` | Writes `%USERPROFILE%\ES-DE\custom_systems\es_systems.xml` (the 43 systems, their ROM folders and emulator order) and `es_find_rules.xml` (the real path of each installed emulator). Reports or creates ROM folders |
-| `configure-emulators.ps1` | `seed_configs`, `gpu.yml` | Emulator tuning, below |
+| `configure-emulators.ps1` | `link_storage`, `seed_configs`, `gpu.yml` | BIOS placement and emulator tuning, below |
+| `install-shortcuts.ps1` | `desktop_apps`, `install-host-launchers.sh` | Start Menu folder `distrobox-gaming` with a shortcut per installed emulator and ES-DE; removes shortcuts for apps no longer installed |
 
 ES-DE merges the two `custom_systems` files with its bundled configuration,
 so systems not in the list keep ES-DE's defaults, and emulators are found

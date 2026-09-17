@@ -153,6 +153,38 @@ finally {
 }
 
 # ---------------------------------------------------------------------------
+# install-shortcuts.ps1
+# ---------------------------------------------------------------------------
+
+$sc = New-TempDir
+try {
+    $scEmu = Join-Path $sc 'Emulators'
+    $scDir = Join-Path $sc 'StartMenu'
+    New-Item -ItemType Directory -Path (Join-Path $scEmu 'flycast'), $scDir -Force | Out-Null
+    Set-Content -Path (Join-Path $scEmu 'flycast\flycast.exe') -Value 'fake'
+    $scCfg = Join-Path $sc 'localhost.psd1'
+    Set-Content -Path $scCfg -Encoding UTF8 -Value "@{ EmulatorsRoot = '$scEmu' }"
+    $shortcuts = Join-Path $windowsRoot 'install-shortcuts.ps1'
+    Set-Content -Path (Join-Path $scDir 'Gone Emulator.lnk') -Value 'stale'
+
+    & $shortcuts -Action Check -ConfigPath $scCfg -ShortcutsDir $scDir | Out-Null
+    Assert ((@(Get-ChildItem $scDir).Count -eq 1) -and (Test-Path (Join-Path $scDir 'Gone Emulator.lnk'))) 'install-shortcuts -Action Check writes nothing'
+
+    & $shortcuts -Action Configure -ConfigPath $scCfg -ShortcutsDir $scDir | Out-Null
+    $lnkPath = Join-Path $scDir 'Flycast.lnk'
+    $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
+    Assert ((Test-Path $lnkPath) -and $lnk.TargetPath -eq (Join-Path $scEmu 'flycast\flycast.exe') -and $lnk.WorkingDirectory -eq (Join-Path $scEmu 'flycast')) 'shortcut targets the emulator and starts in its folder'
+    Assert (-not (Test-Path (Join-Path $scDir 'Gone Emulator.lnk'))) 'shortcuts for apps no longer installed are removed'
+
+    $h = (Get-FileHash $lnkPath).Hash
+    & $shortcuts -Action Configure -ConfigPath $scCfg -ShortcutsDir $scDir | Out-Null
+    Assert ((Get-FileHash $lnkPath).Hash -eq $h) 're-running install-shortcuts leaves shortcuts unchanged'
+}
+finally {
+    Remove-Item -Path $sc -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
 # configure-emulators.ps1 against fixture files
 # ---------------------------------------------------------------------------
 

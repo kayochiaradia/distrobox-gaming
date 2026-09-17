@@ -96,6 +96,13 @@ an emulator. To create the empty per-system ROM folders:
 
 Close ES-DE before running it, then start ES-DE again.
 
+Add Start Menu shortcuts (a `distrobox-gaming` folder) for ES-DE and every
+installed emulator -- the portable ones have no installer to do it:
+
+```powershell
+./install-shortcuts.ps1 -Action Configure
+```
+
 ## 6. First launch
 
 1. Open ES-DE. If its first-run wizard asks for a ROM directory, choose the
