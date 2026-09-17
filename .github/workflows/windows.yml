@@ -1,0 +1,46 @@
+name: windows
+
+on:
+  push:
+    paths:
+      - 'windows/**'
+      - 'ansible/group_vars/all/esde.yml'
+      - 'ansible/roles/scripts_in_box/files/**'
+      - 'ansible/roles/install_rom_patches/files/**'
+      - '.github/workflows/windows.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'ansible/group_vars/all/esde.yml'
+      - 'ansible/roles/scripts_in_box/files/**'
+      - 'ansible/roles/install_rom_patches/files/**'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse every PowerShell script
+        shell: powershell
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem windows -Recurse -Include *.ps1, *.psd1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { Write-Host "::error file=$($f.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)"; $bad++ }
+          }
+          Get-Content -Raw windows\apps.json | ConvertFrom-Json | Out-Null
+          if ($bad) { exit 1 }
+
+      # The content.ps1 tests run the Linux Python helpers on the same portable
+      # Python the project installs; the rest of the suite needs no downloads.
+      - name: Install portable Python
+        shell: powershell
+        run: .\windows\install-apps.ps1 -Only python
+
+      - name: Integration tests
+        shell: powershell
+        run: .\windows\tests\verify.ps1
