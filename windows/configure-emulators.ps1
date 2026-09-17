@@ -1,26 +1,24 @@
 <#
 .SYNOPSIS
-    Apply the project's emulator tuning to an already-installed Windows setup.
+    Apply BIOS placement and emulator tuning to an installed Windows setup.
 
 .DESCRIPTION
-    Windows equivalent of the Linux tree's seed_configs role plus gpu.yml.
-    Reads config/emulators.psd1 and applies it to each emulator's own config:
+    Windows counterpart of the Linux link_storage and seed_configs roles plus
+    gpu.yml. Reads config/emulators.psd1 and:
 
-      - PCSX2       INI keys (upscale, filtering, hotkeys, Pad1)
-      - DuckStation INI keys (resolution, PGXP, widescreen, BIOS dir) plus
-                    optional per-game gamesettings\<SERIAL>.ini overrides
-      - RetroArch   retroarch.cfg keys and per-core option files
-      - Dolphin     optional controller profile files
-      - GPU         per-exe "Graphics performance preference", only on PCs
-                    with more than one GPU
+      1. copies BIOS/firmware from BiosRoot into each installed emulator
+      2. applies settings to each emulator's own INI/TOML, flat cfg or XML
+         config (PCSX2, DuckStation, RetroArch + core options, Flycast,
+         Supermodel, xemu, melonDS, Cemu, Dolphin profiles)
+      3. sets a "High performance" GPU preference per emulator, only on PCs
+         with more than one GPU
 
-    A config file the emulator hasn't created yet is skipped, never written
-    half-baked -- launch each emulator once first. Every file is backed up as
-    <file>.bak.<timestamp> before its first change in a run.
+    Config files the emulator hasn't written yet are skipped (launch it once).
+    Every changed file is backed up as <file>.bak.<timestamp> first.
 
 .PARAMETER Action
     'Check' (default) reports what would change and writes nothing.
-    'Configure' applies the changes.
+    'Configure' applies it.
 
 .EXAMPLE
     ./configure-emulators.ps1 -Action Check
@@ -40,72 +38,97 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'lib\common.ps1')
 
 $apply = $Action -eq 'Configure'
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
 if (-not $EmulatorsConfigPath) { $EmulatorsConfigPath = Join-Path $scriptRoot 'config\emulators.psd1' }
 
 $config = Get-DgConfig -ConfigPath $ConfigPath -ScriptRoot $scriptRoot
-
 $emu = Import-ConfigDataFile -Path $EmulatorsConfigPath
 if ($config.ContainsKey('PreferDiscreteGpu')) { $emu.PreferDiscreteGpu = $config.PreferDiscreteGpu }
+$apps = @(Get-DgApps -ScriptRoot $scriptRoot)
 
-function Get-ConfiguredPath {
-    param([string]$Key, [string]$Default)
-    if ($config.EmulatorConfigPaths -and $config.EmulatorConfigPaths.ContainsKey($Key)) {
-        return $config.EmulatorConfigPaths[$Key]
+# ---------------------------------------------------------------------------
+# Tokens
+# ---------------------------------------------------------------------------
+
+$script:AppDirCache = @{}
+function Get-AppDir {
+    param([string]$Id)
+    if (-not $script:AppDirCache.ContainsKey($Id)) {
+        $app = $apps | Where-Object { $_.id -eq $Id }
+        $exe = if ($app) { Resolve-AppRealExePath -App $app -EmulatorsRoot $config.EmulatorsRoot } else { $null }
+        $script:AppDirCache[$Id] = if ($exe) { Split-Path -Parent $exe } else { $null }
     }
-    return $Default
+    return $script:AppDirCache[$Id]
+}
+
+function Get-RomPath {
+    param([string]$System)
+    if ($config.RomPaths -and $config.RomPaths.ContainsKey($System)) { return $config.RomPaths[$System] }
+    return Join-Path $config.RomRoot $System
+}
+
+# Returns $null when a {dir:app} token names an app that isn't installed.
+function Expand-Tokens {
+    param([string]$Text)
+    $out = $Text
+    foreach ($m in [regex]::Matches($Text, '\{dir:([a-z0-9]+)\}')) {
+        $dir = Get-AppDir -Id $m.Groups[1].Value
+        if (-not $dir) { return $null }
+        $out = $out.Replace($m.Value, $dir)
+    }
+    foreach ($m in [regex]::Matches($out, '\{\{RomPath:([a-z0-9]+)\}\}')) {
+        $out = $out.Replace($m.Value, (Get-RomPath -System $m.Groups[1].Value))
+    }
+    return $out.Replace('{{BiosRoot}}', $config.BiosRoot)
 }
 
 # ---------------------------------------------------------------------------
-# File writers (mirror community.general.ini_file / ansible.builtin.lineinfile)
+# File helpers (mirror community.general.ini_file / lineinfile / backup: true)
 # ---------------------------------------------------------------------------
 
 $script:BackedUp = @{}
-
 function Backup-ConfigFile {
     param([string]$Path)
     if ($script:BackedUp.ContainsKey($Path)) { return }
-    if (Test-Path $Path) {
-        $stamp = Get-Date -Format 'yyyyMMddHHmmss'
-        Copy-Item -Path $Path -Destination "$Path.bak.$stamp" -Force
+    if ([IO.File]::Exists($Path)) {
+        [IO.File]::Copy($Path, "$Path.bak.$(Get-Date -Format 'yyyyMMddHHmmss')", $true)
     }
     $script:BackedUp[$Path] = $true
 }
 
+$utf8 = New-Object Text.UTF8Encoding $false
+
 function Save-Lines {
     param([string]$Path, $Lines)
-    $parent = Split-Path -Parent $Path
-    if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
     Backup-ConfigFile -Path $Path
-    [IO.File]::WriteAllLines($Path, [string[]]$Lines, (New-Object Text.UTF8Encoding $false))
+    [IO.File]::WriteAllLines($Path, [string[]]$Lines, $utf8)
 }
 
 function Read-Lines {
     param([string]$Path)
     $list = New-Object 'System.Collections.Generic.List[string]'
-    if (Test-Path $Path) { foreach ($l in [IO.File]::ReadAllLines($Path)) { $list.Add($l) } }
+    if ([IO.File]::Exists($Path)) { foreach ($l in [IO.File]::ReadAllLines($Path)) { $list.Add($l) } }
     return ,$list
 }
 
-# Returns $true when the value differs from what's on disk (and, with -Apply,
-# after writing it).
-function Set-IniValue {
-    param([string]$Path, [string]$Section, [string]$Option, [string]$Value, [bool]$Apply)
+# "[ Global ]" and "[Global]" are the same section (Supermodel uses spaces).
+function Test-SectionHeader {
+    param([string]$Line, [string]$Section)
+    $t = $Line.Trim()
+    return $t.StartsWith('[') -and $t.EndsWith(']') -and (($t.Substring(1, $t.Length - 2).Trim()) -eq $Section)
+}
 
+function Set-IniValue {
+    param([string]$Path, [string]$Section, [string]$Option, [string]$Value)
     $lines = Read-Lines -Path $Path
     $desired = "$Option = $Value"
 
     $sectionIndex = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].Trim() -eq "[$Section]") { $sectionIndex = $i; break }
+        if (Test-SectionHeader -Line $lines[$i] -Section $Section) { $sectionIndex = $i; break }
     }
-
     if ($sectionIndex -lt 0) {
-        if ($Apply) {
+        if ($apply) {
             if ($lines.Count -gt 0 -and $lines[$lines.Count - 1].Trim() -ne '') { $lines.Add('') }
             $lines.Add("[$Section]")
             $lines.Add($desired)
@@ -118,184 +141,195 @@ function Set-IniValue {
     for ($i = $sectionIndex + 1; $i -lt $lines.Count; $i++) {
         if ($lines[$i].Trim() -match '^\[.+\]$') { $sectionEnd = $i; break }
     }
-
     for ($i = $sectionIndex + 1; $i -lt $sectionEnd; $i++) {
         if ($lines[$i] -match "^\s*$([regex]::Escape($Option))\s*=\s*(.*)$") {
             if ($Matches[1].Trim() -eq $Value) { return $false }
-            if ($Apply) {
-                $lines[$i] = $desired
-                Save-Lines -Path $Path -Lines $lines
-            }
+            if ($apply) { $lines[$i] = $desired; Save-Lines -Path $Path -Lines $lines }
             return $true
         }
     }
-
-    if ($Apply) {
-        $lines.Insert($sectionIndex + 1, $desired)
-        Save-Lines -Path $Path -Lines $lines
-    }
+    if ($apply) { $lines.Insert($sectionIndex + 1, $desired); Save-Lines -Path $Path -Lines $lines }
     return $true
 }
 
-function Set-FlatKeyValue {
-    param([string]$Path, [string]$Key, [string]$Value, [bool]$Apply)
-
+function Set-FlatValue {
+    param([string]$Path, [string]$Key, [string]$Value)
     $lines = Read-Lines -Path $Path
     $desired = "$Key = $Value"
-
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match "^\s*$([regex]::Escape($Key))\s*=\s*(.*)$") {
             if ($Matches[1].Trim() -eq $Value) { return $false }
-            if ($Apply) {
-                $lines[$i] = $desired
-                Save-Lines -Path $Path -Lines $lines
-            }
+            if ($apply) { $lines[$i] = $desired; Save-Lines -Path $Path -Lines $lines }
             return $true
         }
     }
+    if ($apply) { $lines.Add($desired); Save-Lines -Path $Path -Lines $lines }
+    return $true
+}
 
-    if ($Apply) {
-        $lines.Add($desired)
-        Save-Lines -Path $Path -Lines $lines
+# Sets the text of <root>/<XPath>, creating missing child elements.
+function Set-XmlValue {
+    param([string]$Path, [string]$XPath, [string]$Value)
+    $doc = New-Object Xml.XmlDocument
+    $doc.PreserveWhitespace = $true
+    $doc.Load($Path)
+    $node = $doc.DocumentElement
+    foreach ($part in $XPath.Split('/')) {
+        $child = $node.SelectSingleNode($part)
+        if (-not $child) { $child = $node.AppendChild($doc.CreateElement($part)) }
+        $node = $child
+    }
+    $onlyText = @($node.ChildNodes | Where-Object { $_.NodeType -ne 'Text' }).Count -eq 0
+    if ($onlyText -and $node.InnerText -eq $Value) { return $false }
+    if ($apply) {
+        $node.InnerText = $Value
+        Backup-ConfigFile -Path $Path
+        $settings = New-Object Xml.XmlWriterSettings
+        $settings.Encoding = $utf8
+        $writer = [Xml.XmlWriter]::Create($Path, $settings)
+        try { $doc.Save($writer) } finally { $writer.Close() }
     }
     return $true
 }
 
-function Invoke-SettingsBlock {
-    param(
-        [string]$Label,
-        [string]$Path,
-        [array]$Settings,
-        [switch]$Flat,
-        [switch]$CreateIfMissing
-    )
+function Invoke-ConfigFile {
+    param([string]$Label, [string]$Path, [string]$Format, [array]$Settings, [switch]$CreateIfMissing)
 
-    if (-not (Test-Path $Path) -and -not $CreateIfMissing) {
-        Write-Host ("[skip] {0}: {1} does not exist yet -- install and launch it once first" -f $Label, $Path) -ForegroundColor DarkGray
+    if (-not [IO.File]::Exists($Path) -and -not $CreateIfMissing) {
+        Write-Host "[skip] ${Label}: $Path does not exist yet -- launch the emulator once first" -ForegroundColor DarkGray
         return
     }
-
-    $changed = 0
-    $applied = 0
+    $changed = 0; $considered = 0
     foreach ($s in $Settings) {
-        if ($Flat) {
-            if (Set-FlatKeyValue -Path $Path -Key $s.Key -Value $s.Value -Apply $apply) { $changed++ }
-            $applied++
-            continue
+        if ($s.Requires -and -not [IO.File]::Exists((Join-Path $config.BiosRoot $s.Requires))) { continue }
+        if ($s.Value -like '*{{BiosRoot}}*' -and -not [IO.Directory]::Exists($config.BiosRoot)) { continue }
+        $value = Expand-Tokens -Text $s.Value
+        if ($null -eq $value) { continue }
+        $considered++
+        $did = switch ($Format) {
+            'ini' { Set-IniValue -Path $Path -Section $s.Section -Option $s.Option -Value $value }
+            'flat' { Set-FlatValue -Path $Path -Key $s.Key -Value $value }
+            'xml' { Set-XmlValue -Path $Path -XPath $s.XPath -Value $value }
+            default { throw "unknown format '$Format' for $Label" }
         }
-
-        $value = $s.Value
-        if ($value -like '*{{BiosRoot}}*') {
-            if (-not (Test-Path $config.BiosRoot)) {
-                Write-Host ("[skip] {0}: {1}.{2} -- BiosRoot {3} does not exist, keeping the emulator's own BIOS folder" -f $Label, $s.Section, $s.Option, $config.BiosRoot) -ForegroundColor DarkGray
-                continue
-            }
-            $value = $value.Replace('{{BiosRoot}}', $config.BiosRoot)
-        }
-        if (Set-IniValue -Path $Path -Section $s.Section -Option $s.Option -Value $value -Apply $apply) { $changed++ }
-        $applied++
+        if ($did) { $changed++ }
     }
-
     $verb = if ($apply) { 'changed' } else { 'would change' }
-    $color = if ($changed -gt 0) { 'Yellow' } else { 'Green' }
-    Write-Host ("[{0}] {1}: {2} of {3} setting(s) {4}" -f $Label, $Path, $changed, $applied, $verb) -ForegroundColor $color
+    Write-Host ("[{0}] {1}: {2} of {3} setting(s) {4}" -f $Label, $Path, $changed, $considered, $verb) -ForegroundColor $(if ($changed) { 'Yellow' } else { 'Green' })
 }
 
 # ---------------------------------------------------------------------------
-# Emulator settings
+# 1. BIOS / firmware
+# ---------------------------------------------------------------------------
+
+Write-Host "`n== BIOS and firmware ($($config.BiosRoot)) ==" -ForegroundColor Cyan
+
+if (-not [IO.Directory]::Exists($config.BiosRoot)) {
+    Write-Host "[skip] BiosRoot does not exist -- create it and add your own BIOS files to use this step" -ForegroundColor DarkGray
+} else {
+    $copied = 0; $current = 0; $missing = @()
+    foreach ($b in $emu.BiosFiles) {
+        if (-not (Get-AppDir -Id $b.App)) { continue }
+        $dest = Expand-Tokens -Text $b.Dest
+        $srcPattern = Join-Path $config.BiosRoot $b.Source
+        $isDir = $b.Source.EndsWith('\*')
+        $sources = if ($isDir) {
+            $srcDir = Split-Path -Parent $srcPattern
+            if ([IO.Directory]::Exists($srcDir)) { @([IO.Directory]::GetFiles($srcDir)) } else { @() }
+        } elseif ([IO.File]::Exists($srcPattern)) { @($srcPattern) } else { @() }
+        if (-not $sources) { $missing += "$($b.App):$($b.Source)"; continue }
+
+        foreach ($src in $sources) {
+            $target = if ($isDir) { Join-Path $dest ([IO.Path]::GetFileName($src)) } else { $dest }
+            $exists = [IO.File]::Exists($target)
+            $needs = -not $exists -or ($b.Mode -ne 'seed' -and (Get-FileHash -LiteralPath $src).Hash -ne (Get-FileHash -LiteralPath $target).Hash)
+            if (-not $needs) { $current++; continue }
+            if ($apply) {
+                [void][IO.Directory]::CreateDirectory((Split-Path -Parent $target))
+                if ($exists) { Backup-ConfigFile -Path $target }
+                [IO.File]::Copy($src, $target, $true)
+            }
+            $copied++
+            Write-Host "[bios] $([IO.Path]::GetFileName($src)) -> $target $(if (-not $apply) { '(would copy)' })" -ForegroundColor Yellow
+        }
+    }
+    Write-Host "$copied file(s) $(if ($apply) { 'copied' } else { 'to copy' }), $current already in place."
+    if ($missing) {
+        Write-Host "Not in BiosRoot (optional unless you play those systems): $($missing -join ', ')" -ForegroundColor DarkGray
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 2. Emulator settings
 # ---------------------------------------------------------------------------
 
 Write-Host "`n== Emulator settings ($Action) ==" -ForegroundColor Cyan
 
-Invoke-SettingsBlock -Label 'PCSX2' `
-    -Path (Get-ConfiguredPath -Key 'pcsx2' -Default $emu.Pcsx2IniPath) `
-    -Settings $emu.Pcsx2Settings
+$resolvedPaths = @{}
+foreach ($f in $emu.ConfigFiles) {
+    $path = if ($config.EmulatorConfigPaths -and $config.EmulatorConfigPaths.ContainsKey($f.Id)) {
+        $config.EmulatorConfigPaths[$f.Id]
+    } else { Expand-Tokens -Text $f.Path }
+    if (-not $path) {
+        Write-Host "[skip] $($f.Id): not installed" -ForegroundColor DarkGray
+        continue
+    }
+    $resolvedPaths[$f.Id] = $path
+    Invoke-ConfigFile -Label $f.Id -Path $path -Format $f.Format -Settings $f.Settings
+}
 
-$duckIni = Get-ConfiguredPath -Key 'duckstation' -Default $emu.DuckstationIniPath
-Invoke-SettingsBlock -Label 'DuckStation' -Path $duckIni -Settings $emu.DuckstationSettings
-
-if (Test-Path $duckIni) {
+if ($resolvedPaths.ContainsKey('duckstation') -and [IO.File]::Exists($resolvedPaths.duckstation)) {
     foreach ($game in $emu.DuckstationPerGameSettings) {
-        $gamePath = Join-Path (Join-Path (Split-Path -Parent $duckIni) 'gamesettings') "$($game.Serial).ini"
-        Invoke-SettingsBlock -Label "DuckStation $($game.Serial)" -Path $gamePath -Settings $game.Settings -CreateIfMissing
+        $gamePath = Join-Path (Join-Path (Split-Path -Parent $resolvedPaths.duckstation) 'gamesettings') "$($game.Serial).ini"
+        Invoke-ConfigFile -Label "duckstation $($game.Serial)" -Path $gamePath -Format 'ini' -Settings $game.Settings -CreateIfMissing
     }
 }
 
-$retroCfg = Get-ConfiguredPath -Key 'retroarch' -Default $emu.RetroarchCfgPath
-Invoke-SettingsBlock -Label 'RetroArch' -Flat -Path $retroCfg -Settings $emu.RetroarchSettings
-
-# Core option files only exist after a core has run, so they are created --
-# but only once RetroArch itself is installed and has written retroarch.cfg.
-if (Test-Path $retroCfg) {
-    $retroConfigDir = Join-Path (Split-Path -Parent $retroCfg) 'config'
+if ($resolvedPaths.ContainsKey('retroarch') -and [IO.File]::Exists($resolvedPaths.retroarch)) {
+    $retroConfigDir = Join-Path (Split-Path -Parent $resolvedPaths.retroarch) 'config'
     foreach ($core in $emu.RetroarchCoreOptions) {
-        Invoke-SettingsBlock -Label 'RetroArch core' -Flat -CreateIfMissing `
+        Invoke-ConfigFile -Label 'retroarch core' -Format 'flat' -CreateIfMissing `
             -Path (Join-Path $retroConfigDir $core.RelativePath) -Settings $core.Settings
     }
 }
 
-$dolphinConfigDir = Get-ConfiguredPath -Key 'dolphin' -Default $emu.DolphinConfigDir
+$dolphinConfigDir = if ($config.EmulatorConfigPaths -and $config.EmulatorConfigPaths.ContainsKey('dolphin')) {
+    $config.EmulatorConfigPaths.dolphin } else { $emu.DolphinConfigDir }
 foreach ($profile in $emu.DolphinControllerProfiles) {
     $src = Join-Path (Join-Path $scriptRoot 'config') $profile.Source
     $dest = Join-Path $dolphinConfigDir $profile.Dest
-    if (-not (Test-Path $src)) {
-        Write-Host "[skip] Dolphin profile source missing: $src" -ForegroundColor Yellow
-        continue
-    }
-    $same = (Test-Path $dest) -and ((Get-FileHash $src).Hash -eq (Get-FileHash $dest).Hash)
-    if ($same) {
-        Write-Host "[Dolphin] $dest already up to date" -ForegroundColor Green
-        continue
-    }
+    if (-not [IO.File]::Exists($src)) { Write-Host "[skip] Dolphin profile source missing: $src" -ForegroundColor Yellow; continue }
+    if ([IO.File]::Exists($dest) -and (Get-FileHash -LiteralPath $src).Hash -eq (Get-FileHash -LiteralPath $dest).Hash) { continue }
     if ($apply) {
-        $destParent = Split-Path -Parent $dest
-        if (-not (Test-Path $destParent)) { New-Item -ItemType Directory -Path $destParent -Force | Out-Null }
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $dest))
         Backup-ConfigFile -Path $dest
-        Copy-Item -Path $src -Destination $dest -Force
+        [IO.File]::Copy($src, $dest, $true)
     }
-    Write-Host "[Dolphin] $dest $(if ($apply) { 'copied' } else { 'would be copied' })" -ForegroundColor Yellow
+    Write-Host "[dolphin] $dest $(if ($apply) { 'copied' } else { 'would be copied' })" -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------------
-# GPU preference (Windows analogue of dg_nvidia_enabled)
+# 3. GPU preference
 # ---------------------------------------------------------------------------
-
-function Set-GpuPreference {
-    param([string]$ExePath, [bool]$Apply)
-
-    $key = 'HKCU:\SOFTWARE\Microsoft\DirectX\UserGpuPreferences'
-    $desired = 'GpuPreference=2;'
-
-    $current = $null
-    if (Test-Path $key) {
-        $current = (Get-ItemProperty -Path $key -Name $ExePath -ErrorAction SilentlyContinue).$ExePath
-    }
-    if ($current -eq $desired) { return $false }
-    if ($Apply) {
-        if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
-        Set-ItemProperty -Path $key -Name $ExePath -Value $desired
-    }
-    return $true
-}
 
 if ($emu.PreferDiscreteGpu) {
     Write-Host "`n== GPU preference ==" -ForegroundColor Cyan
     $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch 'Basic Display|Remote Display|Virtual' })
-
     if ($gpus.Count -lt 2) {
         Write-Host "[skip] only one GPU found ($($gpus.Name -join ', ')) -- nothing to prefer" -ForegroundColor DarkGray
     } else {
-        $apps = Get-DgApps -ScriptRoot $scriptRoot | Where-Object { $_.role -eq 'emulator' }
-        foreach ($app in $apps) {
+        $key = 'HKCU:\SOFTWARE\Microsoft\DirectX\UserGpuPreferences'
+        foreach ($app in $apps | Where-Object { $_.role -eq 'emulator' }) {
             $exe = Resolve-AppRealExePath -App $app -EmulatorsRoot $config.EmulatorsRoot
-            if (-not $exe) {
-                Write-Host "[skip] $($app.name): not installed" -ForegroundColor DarkGray
-                continue
+            if (-not $exe) { continue }
+            $current = if (Test-Path $key) { (Get-ItemProperty -Path $key -Name $exe -ErrorAction SilentlyContinue).$exe }
+            if ($current -eq 'GpuPreference=2;') { continue }
+            if ($apply) {
+                if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+                Set-ItemProperty -Path $key -Name $exe -Value 'GpuPreference=2;'
             }
-            $changed = Set-GpuPreference -ExePath $exe -Apply $apply
-            $state = if (-not $changed) { 'already set' } elseif ($apply) { 'set' } else { 'would set' }
-            Write-Host "[gpu] $($app.name): $state ($exe)" -ForegroundColor $(if ($changed) { 'Yellow' } else { 'Green' })
+            Write-Host "[gpu] $($app.name): $(if ($apply) { 'set' } else { 'would set' }) high performance" -ForegroundColor Yellow
         }
     }
 }

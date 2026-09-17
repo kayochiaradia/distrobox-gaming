@@ -124,8 +124,13 @@ setup, minus the Linux-only ones (see
 or haven't been opened yet are skipped. Changed files are backed up as
 `<file>.bak.<timestamp>`; copy one back to undo.
 
-If you keep BIOS files in `BiosRoot` (default `%USERPROFILE%\ES-DE\BIOS`),
-DuckStation is pointed at it; otherwise DuckStation keeps its own BIOS folder.
+**BIOS:** put your own dumps in `BiosRoot` (default `%USERPROFILE%\ES-DE\BIOS`)
+with the same layout as an EmuDeck `Emulation\bios` folder -- PS1/PS2 BIOS at
+the top, `dc\naomi.zip` etc. for Flycast, `bios7.bin`/`bios9.bin`/`dsfirmware.bin`
+for melonDS, `mcpx_1.0.bin`/`Complex_4627.bin`/`xbox_hdd.qcow2` for xemu,
+`ps4\sys_modules\` for shadPS4, the Atari ROMs for RetroArch. This step copies
+them into each installed emulator or points its config at them; anything
+absent is skipped. See [BIOS and emulator tuning](README.md#bios-and-emulator-tuning).
 
 ## 8. Play
 

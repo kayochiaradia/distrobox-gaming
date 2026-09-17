@@ -86,16 +86,41 @@ reported unless `CreateRomDirs` is set, so a disconnected drive never turns
 into an empty local folder. Also set ES-DE's own ROM directory to the same
 root so its bundled systems use it.
 
-## Emulator tuning
+## BIOS and emulator tuning
 
-`configure-emulators.ps1` applies [config/emulators.psd1](config/emulators.psd1)
-to each emulator's own config file:
+`configure-emulators.ps1` is the counterpart of the Linux `link_storage` and
+`seed_configs` roles and `gpu.yml`, driven by [config/emulators.psd1](config/emulators.psd1).
+
+**BIOS and firmware.** Keep your own dumps in one folder, `BiosRoot` (default
+`%USERPROFILE%\ES-DE\BIOS`), using the same layout as the Linux
+`dg_bios_root` -- so an existing EmuDeck `Emulation\bios` folder works as-is.
+The script copies what each installed emulator needs (Windows can't symlink
+without Developer Mode) and points config paths at the rest:
+
+| Emulator | From BiosRoot | Goes to |
+|---|---|---|
+| RetroArch | `5200.ROM`, `ATARIXL.ROM`, `ATARIBAS.ROM`, `ATARIOSA.ROM`, `ATARIOSB.ROM`, `lynxboot.img` | RetroArch `system\` |
+| Flycast | `dc\naomi.zip`, `dc\naomi2.zip`, `dc\awbios.zip` | Flycast `data\` |
+| melonDS | `bios7.bin`, `bios9.bin`, `dsfirmware.bin` | melonDS `bios\` (copied once; melonDS writes to the firmware) + config paths |
+| shadPS4 | `ps4\sys_modules\*` | `%APPDATA%\shadPS4\sys_modules` |
+| xemu | `mcpx_1.0.bin`, `Complex_4627.bin`, `xbox_hdd.qcow2` | config paths (used in place, like the Linux symlinks) |
+| DuckStation, PCSX2 | the whole folder | BIOS search folder setting |
+
+Everything is optional and skipped when absent. RPCS3 firmware, Switch keys
+and Wii U keys still go through each emulator's own UI, as on Linux.
+
+**Settings** applied to each emulator's own config file:
 
 | Emulator | Config file | What is applied |
 |---|---|---|
 | PCSX2 | `%USERPROFILE%\Documents\PCSX2\inis\PCSX2.ini` | 6x upscale, 16x AF, FXAA, widescreen patches, texture replacements, fast CDVD, save state on exit, SDL Xbox-style Pad1, Select+Start/L1/R1 hotkeys |
-| DuckStation | `%LOCALAPPDATA%\DuckStation\settings.ini` | 8x resolution, JINC2 filtering, 2x MSAA, PGXP, widescreen hack, 4x CD read/seek, VSync, texture replacements, BIOS folder |
+| DuckStation | `%LOCALAPPDATA%\DuckStation\settings.ini` | 8x resolution, JINC2 filtering, 2x MSAA, PGXP, widescreen hack, 4x CD read/seek, VSync, texture replacements |
 | RetroArch | `retroarch.cfg` + `config\<core>\` next to RetroArch | Xbox-style menu confirm/cancel; bsnes-hd widescreen, melonDS glcore, ParaLLEl-N64 Vulkan core options |
+| Flycast | `emu.cfg` next to Flycast | 4320p internal resolution, widescreen, duplicate frames, no delayed frame swapping |
+| Supermodel | `Config\Supermodel.ini` next to Supermodel | fullscreen (needed on Windows), widescreen, wide background |
+| xemu | `%APPDATA%\xemu\xemu\xemu.toml` | fullscreen, 3x surface scale, no welcome/update prompts |
+| melonDS | `melonDS.toml` next to melonDS | compute renderer at 8x, better polygons, hi-res coordinates, threaded software renderer, direct boot |
+| Cemu | `%APPDATA%\Cemu\settings.xml` | fullscreen, VSync, bicubic upscaling, no update/Discord prompts, Wii U game folder |
 | Dolphin | `%USERPROFILE%\Documents\Dolphin Emulator\Config` | your own controller profiles, if listed |
 | GPU | `HKCU\...\DirectX\UserGpuPreferences` | "High performance" GPU per emulator, **only when the PC has more than one GPU** |
 
@@ -103,15 +128,15 @@ A config file the emulator hasn't written yet is skipped, never created
 half-baked, so launch each emulator once first. Upscale values target a
 high-end discrete GPU; lower them on weaker hardware.
 
-The DuckStation list was checked on 2026-09-17 against a live install
-(0.1-11752): every key exists in the `settings.ini` DuckStation writes itself
-and differs from its Windows default. PCSX2 and RetroArch follow the
-installers' documented defaults and are not verified live yet.
+Verified on 2026-09-17 against live installs: DuckStation 0.1-11752 (every key
+exists and differs from the Windows default), and Flycast 2.7, Supermodel
+0.3a, xemu 0.8.136, melonDS 1.1 and Cemu 2.6 (values survive an emulator
+restart). PCSX2 and RetroArch follow their installers' documented defaults and
+are not verified live yet.
 
-Not tuned yet: the Linux tree's Flycast, Supermodel, xemu, Cemu, melonDS and
-shadPS4 settings. Several of those depend on the maintainer's own files (NAS
-NVRAM packs, an 8BitDo Cemu profile, the Driveclub patch, specific BIOS dump
-names), and the rest need the same live check the DuckStation list got.
+Not ported: shadPS4's Driveclub per-game config and patch, Flycast/Supermodel
+NVRAM packs and the Cemu 8BitDo controller profile -- all built from the Linux
+maintainer's own files.
 
 ### What was not ported
 
@@ -128,7 +153,10 @@ Settings from the Linux tree that do nothing, or the wrong thing, on Windows:
 | Values that already equal the Windows default | Writing them changes nothing |
 | DuckStation per-game GT1/GT2 overrides and cheats, Dolphin 8BitDo profiles | Specific to the Linux maintainer's own games and controller. The same mechanism exists here, empty by default |
 | `retroarch-snes` auto-picker, `retroarch-atari800` mode switch, `flycast-hires`/gamescope, Xenia `.xbla` stubs, OpenBOR `.pak` wrapper, Wine launchers | Linux wrapper scripts. Windows uses the plain emulator command (bsnes default with bsnes-hd as alternative; OpenBOR uses ES-DE's per-game-folder layout) |
-| Walker `.desktop` launchers, zsh + starship, udev rules, UID/GID 1026 | Linux desktop/container plumbing. Windows installers create Start Menu shortcuts |
+| Flycast `pvr.rend`, xemu `backend = vulkan`, Cemu audio `api = 4` | Vulkan/PulseAudio choices tied to the Linux stack; Windows keeps each emulator's own default |
+| Supermodel `X/YResolution` 3840x2160 and `JOY1_BUTTONn` input remaps, Cemu window size/region/language, melonDS 8BitDo joystick mapping | The maintainer's monitor and controller; Linux joystick button order differs from Windows |
+| Cemu `did_show_graphic_pack_download` | Dropped by Cemu 2.6 (it deletes the key on save) |
+| Walker `.desktop` launchers, zsh + starship, udev rules, UID/GID 1026 | Linux desktop/container plumbing |
 
 ## Known issues
 

@@ -68,7 +68,10 @@ $example = Import-ConfigDataFile -Path (Join-Path $windowsRoot 'config\localhost
 Assert ($example.EsdeHome -eq "$env:USERPROFILE\ES-DE") 'localhost.example.psd1 loads and expands %USERPROFILE%'
 Assert ($example.EmulatorsRoot -like 'C:\*') 'default EmulatorsRoot is on C:'
 $emuData = Import-ConfigDataFile -Path (Join-Path $windowsRoot 'config\emulators.psd1')
-Assert ($emuData.DuckstationIniPath -eq "$env:LOCALAPPDATA\DuckStation\settings.ini") 'emulators.psd1 loads and expands %LOCALAPPDATA%'
+$duckEntry = $emuData.ConfigFiles | Where-Object { $_.Id -eq 'duckstation' }
+Assert ($duckEntry.Path -eq "$env:LOCALAPPDATA\DuckStation\settings.ini") 'emulators.psd1 loads and expands %LOCALAPPDATA%'
+Assert (@($emuData.ConfigFiles | Where-Object { $_.App -notin $apps.id }).Count -eq 0) 'every emulators.psd1 config file belongs to an app in apps.json'
+Assert (@($emuData.BiosFiles | Where-Object { $_.App -notin $apps.id }).Count -eq 0) 'every BIOS entry belongs to an app in apps.json'
 
 $listOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsRoot 'install-apps.ps1') -List 2>&1
 Assert ($LASTEXITCODE -eq 0 -and ($listOutput -match 'rpcs3')) 'install-apps.ps1 -List runs and lists every source'
@@ -154,24 +157,59 @@ finally {
 # ---------------------------------------------------------------------------
 
 $configureScript = Join-Path $windowsRoot 'configure-emulators.ps1'
+
+# Real config files the script would touch outside the fixture -- they must
+# not change during the test.
+$realConfigs = @(
+    "$env:APPDATA\xemu\xemu\xemu.toml", "$env:APPDATA\Cemu\settings.xml",
+    "$env:LOCALAPPDATA\DuckStation\settings.ini", "$env:USERPROFILE\Documents\PCSX2\inis\PCSX2.ini"
+) | Where-Object { Test-Path $_ }
+$realHashes = @{}
+foreach ($r in $realConfigs) { $realHashes[$r] = (Get-FileHash $r).Hash }
+
 $fx = New-TempDir
+$fxEmu = Join-Path $fx 'Emulators'
+$fxBios = Join-Path $fx 'BIOS'
+$fxRoms = Join-Path $fx 'ROMs'
 $fxDuck = Join-Path $fx 'DuckStation\settings.ini'
 $fxRetro = Join-Path $fx 'RetroArch-Win64\retroarch.cfg'
 $fxPcsx2 = Join-Path $fx 'PCSX2\inis\PCSX2.ini'
-$fxBios = Join-Path $fx 'BIOS'
-New-Item -ItemType Directory -Path (Split-Path $fxDuck), (Split-Path $fxRetro), $fxBios -Force | Out-Null
+$fxCemu = Join-Path $fx 'Cemu\settings.xml'
+$fxXemu = Join-Path $fx 'xemu\xemu.toml'
+$fxFlycastExe = Join-Path $fxEmu 'flycast\flycast.exe'
+$fxSuperExe = Join-Path $fxEmu 'Supermodel\supermodel-test\supermodel.exe'
+$fxSuperIni = Join-Path $fxEmu 'Supermodel\supermodel-test\Config\Supermodel.ini'
+$fxMelonExe = Join-Path $fxEmu 'melonDS\melonDS.exe'
+
+foreach ($f in $fxDuck, $fxRetro, $fxCemu, $fxXemu, $fxFlycastExe, $fxSuperIni, $fxMelonExe, (Join-Path $fxBios 'dc\naomi.zip')) {
+    New-Item -ItemType Directory -Path (Split-Path $f) -Force | Out-Null
+}
 Set-Content -Path $fxDuck -Value @('[Main]', 'ConfirmPowerOff = true', '', '[GPU]', 'ResolutionScale = 1', 'Keep = me') -Encoding UTF8
 Set-Content -Path $fxRetro -Value @('menu_swap_ok_cancel_buttons = "false"', 'video_driver = "d3d11"') -Encoding UTF8
+Set-Content -Path $fxCemu -Encoding UTF8 -Value @('<?xml version="1.0" encoding="UTF-8"?>', '<content>', '    <fullscreen>false</fullscreen>', '    <Graphic>', '        <VSync>0</VSync>', '    </Graphic>', '    <GamePaths>', '        <Entry>C:/Games</Entry>', '    </GamePaths>', '</content>')
+Set-Content -Path $fxXemu -Value @('[sys.files]', "eeprom_path = 'C:\x\eeprom.bin'") -Encoding UTF8
+foreach ($exe in $fxFlycastExe, $fxSuperExe, $fxMelonExe) { Set-Content -Path $exe -Value 'fake' }
+Set-Content -Path (Join-Path $fxEmu 'flycast\emu.cfg') -Value @('[window]', 'width = 640') -Encoding UTF8
+Set-Content -Path $fxSuperIni -Value @('[ Global ]', 'New3DEngine = true', 'WideScreen = false') -Encoding UTF8
+Set-Content -Path (Join-Path $fxEmu 'melonDS\melonDS.toml') -Value @('[3D]', 'Renderer = 0') -Encoding UTF8
+Set-Content -Path (Join-Path $fxBios 'dc\naomi.zip') -Value 'naomi-v1'
+Set-Content -Path (Join-Path $fxBios 'bios7.bin') -Value 'bios7-v1'
+Set-Content -Path (Join-Path $fxBios 'mcpx_1.0.bin') -Value 'mcpx'
+
 $fxConfig = Join-Path $fx 'localhost.psd1'
 Set-Content -Path $fxConfig -Encoding UTF8 -Value @"
 @{
     BiosRoot = '$fxBios'
-    EmulatorsRoot = '$(Join-Path $fx 'Emulators')'
+    RomRoot = '$fxRoms'
+    EmulatorsRoot = '$fxEmu'
     PreferDiscreteGpu = `$false
     EmulatorConfigPaths = @{
         pcsx2 = '$fxPcsx2'
         duckstation = '$fxDuck'
         retroarch = '$fxRetro'
+        cemu = '$fxCemu'
+        xemu = '$fxXemu'
+        dolphin = '$(Join-Path $fx 'Dolphin')'
     }
 }
 "@
@@ -181,8 +219,10 @@ try {
     & $configureScript -Action Check -ConfigPath $fxConfig | Out-Null
     Assert ((Get-FileHash $fxDuck).Hash -eq $duckHash) 'configure-emulators -Action Check writes nothing'
     Assert (-not (Test-Path (Join-Path $fx 'RetroArch-Win64\config'))) 'Check does not create RetroArch core option files'
+    Assert (-not (Test-Path (Join-Path $fxEmu 'flycast\data\naomi.zip'))) 'Check does not copy BIOS files'
 
     & $configureScript -Action Configure -ConfigPath $fxConfig | Out-Null
+
     $duck = Get-Content $fxDuck
     Assert ($duck -contains 'ConfirmPowerOff = false') 'Configure updates an existing INI key in place'
     Assert ($duck -contains 'ResolutionScale = 8') 'Configure updates a key in a later section'
@@ -195,16 +235,46 @@ try {
     Assert (-not (Test-Path $fxPcsx2)) 'Configure never creates a config file the emulator has not written yet (PCSX2)'
     Assert (@(Get-ChildItem (Split-Path $fxDuck) -Filter 'settings.ini.bak.*').Count -eq 1) 'Configure backs up a changed file once'
 
+    $super = Get-Content $fxSuperIni
+    Assert (($super -contains 'WideScreen = true') -and @($super | Where-Object { $_ -match '^\s*\[\s*Global\s*\]' }).Count -eq 1) 'Supermodel "[ Global ]" is matched without adding a duplicate section'
+    Assert ((Get-Content (Join-Path $fxEmu 'flycast\emu.cfg')) -contains 'rend.WideScreen = yes') 'Flycast settings land in a new [config] section of emu.cfg'
+
+    [xml]$cemu = Get-Content -Raw $fxCemu
+    Assert ($cemu.content.fullscreen -eq 'true' -and $cemu.content.Graphic.VSync -eq '1') 'Cemu XML values are updated'
+    Assert ($cemu.content.GamePaths.Entry -eq (Join-Path $fxRoms 'wiiu')) 'Cemu game path uses {{RomPath:wiiu}}'
+
+    $xemu = Get-Content $fxXemu
+    Assert ($xemu -contains "bootrom_path = '$fxBios\mcpx_1.0.bin'") 'xemu BIOS path is set when the file exists in BiosRoot'
+    Assert (-not ($xemu -match 'flashrom_path')) 'xemu settings whose BIOS file is missing are skipped'
+
+    $melon = Get-Content (Join-Path $fxEmu 'melonDS\melonDS.toml')
+    Assert ($melon -contains "BIOS7Path = '$fxEmu\melonDS\bios\bios7.bin'") 'melonDS BIOS path resolves {dir:melonds} with a TOML literal string'
+    Assert (-not ($melon -match 'BIOS9Path')) 'melonDS BIOS9 path skipped when bios9.bin is missing'
+
+    $naomi = Join-Path $fxEmu 'flycast\data\naomi.zip'
+    $bios7 = Join-Path $fxEmu 'melonDS\bios\bios7.bin'
+    Assert ((Test-Path $naomi) -and (Test-Path $bios7)) 'BIOS files are copied into installed emulators'
+
     $duckHash = (Get-FileHash $fxDuck).Hash
     $retroHash = (Get-FileHash $fxRetro).Hash
+    $cemuHash = (Get-FileHash $fxCemu).Hash
     Start-Sleep -Seconds 1
     & $configureScript -Action Configure -ConfigPath $fxConfig | Out-Null
-    Assert (((Get-FileHash $fxDuck).Hash -eq $duckHash) -and ((Get-FileHash $fxRetro).Hash -eq $retroHash)) 'Re-running configure-emulators is idempotent'
+    Assert (((Get-FileHash $fxDuck).Hash -eq $duckHash) -and ((Get-FileHash $fxRetro).Hash -eq $retroHash) -and ((Get-FileHash $fxCemu).Hash -eq $cemuHash)) 'Re-running configure-emulators is idempotent (INI, cfg, XML)'
     Assert (@(Get-ChildItem (Split-Path $fxDuck) -Filter 'settings.ini.bak.*').Count -eq 1) 'Idempotent re-run creates no new backup'
+
+    Set-Content -Path (Join-Path $fxBios 'dc\naomi.zip') -Value 'naomi-v2'
+    Set-Content -Path (Join-Path $fxBios 'bios7.bin') -Value 'bios7-v2'
+    & $configureScript -Action Configure -ConfigPath $fxConfig | Out-Null
+    Assert ((Get-Content $naomi) -eq 'naomi-v2') 'sync-mode BIOS files are recopied when the source changes'
+    Assert ((Get-Content $bios7) -eq 'bios7-v1') 'seed-mode BIOS files are never overwritten'
 }
 finally {
     Remove-Item -Path $fx -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+$touched = @($realConfigs | Where-Object { (Get-FileHash $_).Hash -ne $realHashes[$_] })
+Assert ($touched.Count -eq 0) "the test left real emulator configs untouched$(if ($touched) { " -- CHANGED: $($touched -join ', ')" })"
 
 # ---------------------------------------------------------------------------
 

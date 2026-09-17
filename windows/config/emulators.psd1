@@ -1,151 +1,236 @@
 @{
-    # Windows port of ansible/group_vars/all/emulators.yml + gpu.yml, trimmed
-    # to settings that actually change something on Windows. Dropped on
-    # purpose (see windows/README.md#what-was-not-ported):
-    #   - values that already are the Windows default
-    #   - keys that no longer exist in current emulator builds
-    #   - Linux-only workarounds: VK_ICD_FILENAMES/Vulkan forcing, PulseAudio,
-    #     container locale (PCSX2 Language), NAS read-ahead (CdvdPrecache,
-    #     LoadImageToRAM -- ROMs live on the local C: drive here)
+    # Windows port of ansible/group_vars/all/emulators.yml, gpu.yml and the
+    # link_storage role, trimmed to settings that change something on Windows.
+    # Dropped on purpose (see windows/README.md#what-was-not-ported): values
+    # already equal to the Windows default, keys missing from current builds,
+    # Linux-only workarounds (Vulkan/ICD forcing, PulseAudio, container locale,
+    # NAS read-ahead) and maintainer-specific data (monitor resolution, 8BitDo
+    # mappings, specific games).
     #
-    # Paths use %VAR% placeholders (Import-PowerShellDataFile can't evaluate
-    # $env:), expanded when loaded.
-    #
-    # configure-emulators.ps1 only edits a config file the emulator already
-    # created on first launch -- run each emulator once before -Action Configure.
+    # Path tokens: %VAR% (expanded on load), {dir:<app id>} = folder of that
+    # app's installed exe. Value tokens: {{BiosRoot}}, {{RomPath:<system>}}.
+    # A setting whose value uses {{BiosRoot}} is skipped when BiosRoot doesn't
+    # exist; a setting with Requires is skipped when BiosRoot\<Requires> is
+    # missing. A config file is only edited once the emulator has written it
+    # (launch it once first), except files marked CreateIfMissing.
 
-    # --- PCSX2 (PS2) --------------------------------------------------------
-    # Not yet verified against a live Windows install (installer needs UAC).
-    Pcsx2IniPath = '%USERPROFILE%\Documents\PCSX2\inis\PCSX2.ini'
-    Pcsx2Settings = @(
-        @{ Section = 'UI'; Option = 'ConfirmShutdown'; Value = 'false' }
-        @{ Section = 'Hotkeys'; Option = 'ShutdownVM'; Value = 'SDL-0/Start & SDL-0/Back' }
-        @{ Section = 'Hotkeys'; Option = 'SaveStateToSlot1'; Value = 'SDL-0/Back & SDL-0/RightShoulder' }
-        @{ Section = 'Hotkeys'; Option = 'LoadStateFromSlot1'; Value = 'SDL-0/Back & SDL-0/LeftShoulder' }
-        # 6x internal resolution targets a high-end discrete GPU (4K output).
-        # Lower it on weaker hardware.
-        @{ Section = 'EmuCore/GS'; Option = 'upscale_multiplier'; Value = '6.000000' }
-        @{ Section = 'EmuCore/GS'; Option = 'MaxAnisotropy'; Value = '16' }
-        @{ Section = 'EmuCore/GS'; Option = 'fxaa'; Value = 'true' }
-        @{ Section = 'EmuCore/GS'; Option = 'LoadTextureReplacements'; Value = 'true' }
-        @{ Section = 'EmuCore/GS'; Option = 'TextureReplacementsAsync'; Value = 'true' }
-        @{ Section = 'EmuCore'; Option = 'EnableWideScreenPatches'; Value = 'true' }
-        @{ Section = 'EmuCore/Speedhacks'; Option = 'fastCDVD'; Value = 'true' }
-        @{ Section = 'EmuCore'; Option = 'SaveStateOnShutdown'; Value = 'true' }
-        # SDL must be on for the SDL-0/* bindings below to resolve.
-        @{ Section = 'InputSources'; Option = 'SDL'; Value = 'true' }
-        @{ Section = 'InputSources'; Option = 'SDLControllerEnhancedMode'; Value = 'true' }
-        @{ Section = 'Pad1'; Option = 'Type'; Value = 'DualShock2' }
-        @{ Section = 'Pad1'; Option = 'Cross'; Value = 'SDL-0/A' }
-        @{ Section = 'Pad1'; Option = 'Circle'; Value = 'SDL-0/B' }
-        @{ Section = 'Pad1'; Option = 'Square'; Value = 'SDL-0/X' }
-        @{ Section = 'Pad1'; Option = 'Triangle'; Value = 'SDL-0/Y' }
-        @{ Section = 'Pad1'; Option = 'DPadUp'; Value = 'SDL-0/DPadUp' }
-        @{ Section = 'Pad1'; Option = 'DPadDown'; Value = 'SDL-0/DPadDown' }
-        @{ Section = 'Pad1'; Option = 'DPadLeft'; Value = 'SDL-0/DPadLeft' }
-        @{ Section = 'Pad1'; Option = 'DPadRight'; Value = 'SDL-0/DPadRight' }
-        @{ Section = 'Pad1'; Option = 'L1'; Value = 'SDL-0/LeftShoulder' }
-        @{ Section = 'Pad1'; Option = 'R1'; Value = 'SDL-0/RightShoulder' }
-        @{ Section = 'Pad1'; Option = 'L2'; Value = 'SDL-0/+LeftTrigger' }
-        @{ Section = 'Pad1'; Option = 'R2'; Value = 'SDL-0/+RightTrigger' }
-        @{ Section = 'Pad1'; Option = 'L3'; Value = 'SDL-0/LeftStick' }
-        @{ Section = 'Pad1'; Option = 'R3'; Value = 'SDL-0/RightStick' }
-        @{ Section = 'Pad1'; Option = 'Select'; Value = 'SDL-0/Back' }
-        @{ Section = 'Pad1'; Option = 'Start'; Value = 'SDL-0/Start' }
-        @{ Section = 'Pad1'; Option = 'LUp'; Value = 'SDL-0/-LeftY' }
-        @{ Section = 'Pad1'; Option = 'LDown'; Value = 'SDL-0/+LeftY' }
-        @{ Section = 'Pad1'; Option = 'LLeft'; Value = 'SDL-0/-LeftX' }
-        @{ Section = 'Pad1'; Option = 'LRight'; Value = 'SDL-0/+LeftX' }
-        @{ Section = 'Pad1'; Option = 'RUp'; Value = 'SDL-0/-RightY' }
-        @{ Section = 'Pad1'; Option = 'RDown'; Value = 'SDL-0/+RightY' }
-        @{ Section = 'Pad1'; Option = 'RLeft'; Value = 'SDL-0/-RightX' }
-        @{ Section = 'Pad1'; Option = 'RRight'; Value = 'SDL-0/+RightX' }
+    # --- BIOS / firmware (link_storage) --------------------------------------
+    # Same relative layout under BiosRoot as the Linux dg_bios_root (EmuDeck
+    # layout), so an existing EmuDeck BIOS folder works as BiosRoot. Windows
+    # can't symlink without Developer Mode, so files are copied: Mode 'sync'
+    # recopies when the source changes, 'seed' only copies when missing (for
+    # files the emulator writes to). Missing sources are reported and skipped.
+    BiosFiles = @(
+        # RetroArch system dir -- all optional; see docs/atari.md.
+        @{ App = 'retroarch'; Source = '5200.ROM'; Dest = '{dir:retroarch}\system\5200.ROM' }
+        @{ App = 'retroarch'; Source = 'ATARIXL.ROM'; Dest = '{dir:retroarch}\system\ATARIXL.ROM' }
+        @{ App = 'retroarch'; Source = 'ATARIBAS.ROM'; Dest = '{dir:retroarch}\system\ATARIBAS.ROM' }
+        @{ App = 'retroarch'; Source = 'ATARIOSA.ROM'; Dest = '{dir:retroarch}\system\ATARIOSA.ROM' }
+        @{ App = 'retroarch'; Source = 'ATARIOSB.ROM'; Dest = '{dir:retroarch}\system\ATARIOSB.ROM' }
+        @{ App = 'retroarch'; Source = 'lynxboot.img'; Dest = '{dir:retroarch}\system\lynxboot.img' }
+        # Flycast arcade BIOS sets; NAOMI/Atomiswave games don't boot without them.
+        @{ App = 'flycast'; Source = 'dc\naomi.zip'; Dest = '{dir:flycast}\data\naomi.zip' }
+        @{ App = 'flycast'; Source = 'dc\naomi2.zip'; Dest = '{dir:flycast}\data\naomi2.zip' }
+        @{ App = 'flycast'; Source = 'dc\awbios.zip'; Dest = '{dir:flycast}\data\awbios.zip' }
+        # melonDS writes user settings into the firmware file: seed only.
+        @{ App = 'melonds'; Source = 'bios7.bin'; Dest = '{dir:melonds}\bios\bios7.bin'; Mode = 'seed' }
+        @{ App = 'melonds'; Source = 'bios9.bin'; Dest = '{dir:melonds}\bios\bios9.bin'; Mode = 'seed' }
+        @{ App = 'melonds'; Source = 'dsfirmware.bin'; Dest = '{dir:melonds}\bios\dsfirmware.bin'; Mode = 'seed' }
+        # PS4 firmware modules for shadPS4 (every file in the folder).
+        @{ App = 'shadps4'; Source = 'ps4\sys_modules\*'; Dest = '%APPDATA%\shadPS4\sys_modules' }
     )
 
-    # --- DuckStation (PS1) --------------------------------------------------
-    # Verified 2026-09-17 against a live install (0.1-11752): every key below
-    # exists in its settings.ini and differs from the Windows default.
-    DuckstationIniPath = '%LOCALAPPDATA%\DuckStation\settings.ini'
-    DuckstationSettings = @(
-        @{ Section = 'Main'; Option = 'ConfirmPowerOff'; Value = 'false' }
-        @{ Section = 'Main'; Option = 'StartFullscreen'; Value = 'true' }
-        @{ Section = 'Main'; Option = 'CreateSaveStateBackups'; Value = 'false' }
-        # Only applied when BiosRoot exists; otherwise DuckStation keeps its
-        # own %LOCALAPPDATA%\DuckStation\bios folder.
-        @{ Section = 'BIOS'; Option = 'SearchDirectory'; Value = '{{BiosRoot}}' }
-        @{ Section = 'BIOS'; Option = 'PatchFastBoot'; Value = 'true' }
-        # 8x (4K+) targets a high-end discrete GPU. Lower it on weaker hardware.
-        @{ Section = 'GPU'; Option = 'ResolutionScale'; Value = '8' }
-        @{ Section = 'GPU'; Option = 'TextureFilter'; Value = 'JINC2' }
-        @{ Section = 'GPU'; Option = 'SpriteTextureFilter'; Value = 'JINC2' }
-        @{ Section = 'GPU'; Option = 'Multisamples'; Value = '2' }
-        @{ Section = 'GPU'; Option = 'PGXPEnable'; Value = 'true' }
-        @{ Section = 'GPU'; Option = 'PGXPDepthBuffer'; Value = 'true' }
-        @{ Section = 'GPU'; Option = 'PGXPPreserveProjFP'; Value = 'true' }
-        @{ Section = 'GPU'; Option = 'WidescreenHack'; Value = 'true' }
-        @{ Section = 'CDROM'; Option = 'ReadSpeedup'; Value = '4' }
-        @{ Section = 'CDROM'; Option = 'SeekSpeedup'; Value = '4' }
-        @{ Section = 'Display'; Option = 'VSync'; Value = 'true' }
-        @{ Section = 'TextureReplacements'; Option = 'EnableTextureReplacements'; Value = 'true' }
-        @{ Section = 'TextureReplacements'; Option = 'PreloadTextures'; Value = 'true' }
-        # Lives under [Hacks] in older builds; current builds moved it here.
-        @{ Section = 'TextureReplacements'; Option = 'MaxVRAMWriteSplits'; Value = '1024' }
+    # --- Emulator config files -----------------------------------------------
+    ConfigFiles = @(
+        # PCSX2 -- not yet verified against a live install (installer needs UAC).
+        @{ Id = 'pcsx2'; App = 'pcsx2'; Format = 'ini'
+           Path = '%USERPROFILE%\Documents\PCSX2\inis\PCSX2.ini'
+           Settings = @(
+               @{ Section = 'UI'; Option = 'ConfirmShutdown'; Value = 'false' }
+               @{ Section = 'Folders'; Option = 'Bios'; Value = '{{BiosRoot}}' }
+               @{ Section = 'Hotkeys'; Option = 'ShutdownVM'; Value = 'SDL-0/Start & SDL-0/Back' }
+               @{ Section = 'Hotkeys'; Option = 'SaveStateToSlot1'; Value = 'SDL-0/Back & SDL-0/RightShoulder' }
+               @{ Section = 'Hotkeys'; Option = 'LoadStateFromSlot1'; Value = 'SDL-0/Back & SDL-0/LeftShoulder' }
+               # 6x targets a high-end discrete GPU (4K output).
+               @{ Section = 'EmuCore/GS'; Option = 'upscale_multiplier'; Value = '6.000000' }
+               @{ Section = 'EmuCore/GS'; Option = 'MaxAnisotropy'; Value = '16' }
+               @{ Section = 'EmuCore/GS'; Option = 'fxaa'; Value = 'true' }
+               @{ Section = 'EmuCore/GS'; Option = 'LoadTextureReplacements'; Value = 'true' }
+               @{ Section = 'EmuCore/GS'; Option = 'TextureReplacementsAsync'; Value = 'true' }
+               @{ Section = 'EmuCore'; Option = 'EnableWideScreenPatches'; Value = 'true' }
+               @{ Section = 'EmuCore/Speedhacks'; Option = 'fastCDVD'; Value = 'true' }
+               @{ Section = 'EmuCore'; Option = 'SaveStateOnShutdown'; Value = 'true' }
+               @{ Section = 'InputSources'; Option = 'SDL'; Value = 'true' }
+               @{ Section = 'InputSources'; Option = 'SDLControllerEnhancedMode'; Value = 'true' }
+               @{ Section = 'Pad1'; Option = 'Type'; Value = 'DualShock2' }
+               @{ Section = 'Pad1'; Option = 'Cross'; Value = 'SDL-0/A' }
+               @{ Section = 'Pad1'; Option = 'Circle'; Value = 'SDL-0/B' }
+               @{ Section = 'Pad1'; Option = 'Square'; Value = 'SDL-0/X' }
+               @{ Section = 'Pad1'; Option = 'Triangle'; Value = 'SDL-0/Y' }
+               @{ Section = 'Pad1'; Option = 'DPadUp'; Value = 'SDL-0/DPadUp' }
+               @{ Section = 'Pad1'; Option = 'DPadDown'; Value = 'SDL-0/DPadDown' }
+               @{ Section = 'Pad1'; Option = 'DPadLeft'; Value = 'SDL-0/DPadLeft' }
+               @{ Section = 'Pad1'; Option = 'DPadRight'; Value = 'SDL-0/DPadRight' }
+               @{ Section = 'Pad1'; Option = 'L1'; Value = 'SDL-0/LeftShoulder' }
+               @{ Section = 'Pad1'; Option = 'R1'; Value = 'SDL-0/RightShoulder' }
+               @{ Section = 'Pad1'; Option = 'L2'; Value = 'SDL-0/+LeftTrigger' }
+               @{ Section = 'Pad1'; Option = 'R2'; Value = 'SDL-0/+RightTrigger' }
+               @{ Section = 'Pad1'; Option = 'L3'; Value = 'SDL-0/LeftStick' }
+               @{ Section = 'Pad1'; Option = 'R3'; Value = 'SDL-0/RightStick' }
+               @{ Section = 'Pad1'; Option = 'Select'; Value = 'SDL-0/Back' }
+               @{ Section = 'Pad1'; Option = 'Start'; Value = 'SDL-0/Start' }
+               @{ Section = 'Pad1'; Option = 'LUp'; Value = 'SDL-0/-LeftY' }
+               @{ Section = 'Pad1'; Option = 'LDown'; Value = 'SDL-0/+LeftY' }
+               @{ Section = 'Pad1'; Option = 'LLeft'; Value = 'SDL-0/-LeftX' }
+               @{ Section = 'Pad1'; Option = 'LRight'; Value = 'SDL-0/+LeftX' }
+               @{ Section = 'Pad1'; Option = 'RUp'; Value = 'SDL-0/-RightY' }
+               @{ Section = 'Pad1'; Option = 'RDown'; Value = 'SDL-0/+RightY' }
+               @{ Section = 'Pad1'; Option = 'RLeft'; Value = 'SDL-0/-RightX' }
+               @{ Section = 'Pad1'; Option = 'RRight'; Value = 'SDL-0/+RightX' }
+           ) }
+
+        # DuckStation -- verified live 2026-09-17 (0.1-11752): every key exists
+        # in the settings.ini DuckStation writes and differs from its default.
+        @{ Id = 'duckstation'; App = 'duckstation'; Format = 'ini'
+           Path = '%LOCALAPPDATA%\DuckStation\settings.ini'
+           Settings = @(
+               @{ Section = 'Main'; Option = 'ConfirmPowerOff'; Value = 'false' }
+               @{ Section = 'Main'; Option = 'StartFullscreen'; Value = 'true' }
+               @{ Section = 'Main'; Option = 'CreateSaveStateBackups'; Value = 'false' }
+               @{ Section = 'BIOS'; Option = 'SearchDirectory'; Value = '{{BiosRoot}}' }
+               @{ Section = 'BIOS'; Option = 'PatchFastBoot'; Value = 'true' }
+               @{ Section = 'GPU'; Option = 'ResolutionScale'; Value = '8' }
+               @{ Section = 'GPU'; Option = 'TextureFilter'; Value = 'JINC2' }
+               @{ Section = 'GPU'; Option = 'SpriteTextureFilter'; Value = 'JINC2' }
+               @{ Section = 'GPU'; Option = 'Multisamples'; Value = '2' }
+               @{ Section = 'GPU'; Option = 'PGXPEnable'; Value = 'true' }
+               @{ Section = 'GPU'; Option = 'PGXPDepthBuffer'; Value = 'true' }
+               @{ Section = 'GPU'; Option = 'PGXPPreserveProjFP'; Value = 'true' }
+               @{ Section = 'GPU'; Option = 'WidescreenHack'; Value = 'true' }
+               @{ Section = 'CDROM'; Option = 'ReadSpeedup'; Value = '4' }
+               @{ Section = 'CDROM'; Option = 'SeekSpeedup'; Value = '4' }
+               @{ Section = 'Display'; Option = 'VSync'; Value = 'true' }
+               @{ Section = 'TextureReplacements'; Option = 'EnableTextureReplacements'; Value = 'true' }
+               @{ Section = 'TextureReplacements'; Option = 'PreloadTextures'; Value = 'true' }
+               @{ Section = 'TextureReplacements'; Option = 'MaxVRAMWriteSplits'; Value = '1024' }
+           ) }
+
+        # RetroArch -- config lives beside the exe on Windows.
+        @{ Id = 'retroarch'; App = 'retroarch'; Format = 'flat'
+           Path = '{dir:retroarch}\retroarch.cfg'
+           Settings = @(
+               # The Linux audio_driver=pulse override has no Windows equivalent.
+               @{ Key = 'menu_swap_ok_cancel_buttons'; Value = '"true"' }
+           ) }
+
+        # Flycast -- emu.cfg only stores non-default values. Linux pvr.rend
+        # (forced Vulkan) is not ported; vsync, EmulateFramebuffer and
+        # AutoSkipFrame are left at their defaults.
+        @{ Id = 'flycast'; App = 'flycast'; Format = 'ini'
+           Path = '{dir:flycast}\emu.cfg'
+           Settings = @(
+               # 4320 = 9x internal resolution; targets a high-end GPU.
+               @{ Section = 'config'; Option = 'rend.Resolution'; Value = '4320' }
+               @{ Section = 'config'; Option = 'rend.WideScreen'; Value = 'yes' }
+               @{ Section = 'config'; Option = 'rend.DupeFrames'; Value = 'yes' }
+               @{ Section = 'config'; Option = 'rend.DelayFrameSwapping'; Value = 'no' }
+           ) }
+
+        # Supermodel -- ships Config\Supermodel.ini with "[ Global ]". The
+        # Linux X/YResolution (maintainer's monitor) and xpad button mapping
+        # (Linux joystick ordering) are not ported. FullScreen is required on
+        # Windows per ES-DE's guide.
+        @{ Id = 'supermodel'; App = 'supermodel'; Format = 'ini'
+           Path = '{dir:supermodel}\Config\Supermodel.ini'
+           Settings = @(
+               @{ Section = 'Global'; Option = 'FullScreen'; Value = 'true' }
+               @{ Section = 'Global'; Option = 'WideScreen'; Value = 'true' }
+               @{ Section = 'Global'; Option = 'WideBackground'; Value = 'true' }
+           ) }
+
+        # xemu -- BIOS/flash/HDD come straight from BiosRoot (Linux symlinks
+        # them; the HDD image is written in place in both cases). Linux
+        # backend='vulkan' is not ported.
+        @{ Id = 'xemu'; App = 'xemu'; Format = 'ini'
+           Path = '%APPDATA%\xemu\xemu\xemu.toml'
+           Settings = @(
+               @{ Section = 'general'; Option = 'show_welcome'; Value = 'false' }
+               @{ Section = 'general.updates'; Option = 'check'; Value = 'false' }
+               @{ Section = 'display.window'; Option = 'fullscreen_on_startup'; Value = 'true' }
+               @{ Section = 'display.quality'; Option = 'surface_scale'; Value = '3' }
+               @{ Section = 'sys.files'; Option = 'bootrom_path'; Value = "'{{BiosRoot}}\mcpx_1.0.bin'"; Requires = 'mcpx_1.0.bin' }
+               @{ Section = 'sys.files'; Option = 'flashrom_path'; Value = "'{{BiosRoot}}\Complex_4627.bin'"; Requires = 'Complex_4627.bin' }
+               @{ Section = 'sys.files'; Option = 'hdd_path'; Value = "'{{BiosRoot}}\xbox_hdd.qcow2'"; Requires = 'xbox_hdd.qcow2' }
+           ) }
+
+        # melonDS -- the Windows melonDS.toml omits these sections entirely
+        # (defaults). Linux joystick mapping (8BitDo) is not ported.
+        @{ Id = 'melonds'; App = 'melonds'; Format = 'ini'
+           Path = '{dir:melonds}\melonDS.toml'
+           Settings = @(
+               @{ Section = '3D'; Option = 'Renderer'; Value = '2' }
+               @{ Section = '3D.GL'; Option = 'ScaleFactor'; Value = '8' }
+               @{ Section = '3D.GL'; Option = 'BetterPolygons'; Value = 'true' }
+               @{ Section = '3D.GL'; Option = 'HiresCoordinates'; Value = 'true' }
+               @{ Section = '3D.Soft'; Option = 'Threaded'; Value = 'true' }
+               @{ Section = 'Emu'; Option = 'DirectBoot'; Value = 'true' }
+               @{ Section = 'Emu'; Option = 'ExternalBIOSEnable'; Value = 'true'; Requires = 'bios7.bin' }
+               @{ Section = 'DS'; Option = 'BIOS7Path'; Value = "'{dir:melonds}\bios\bios7.bin'"; Requires = 'bios7.bin' }
+               @{ Section = 'DS'; Option = 'BIOS9Path'; Value = "'{dir:melonds}\bios\bios9.bin'"; Requires = 'bios9.bin' }
+               @{ Section = 'DS'; Option = 'FirmwarePath'; Value = "'{dir:melonds}\bios\dsfirmware.bin'"; Requires = 'dsfirmware.bin' }
+           ) }
+
+        # Cemu -- verified live 2026-09-17 (2.6): values survive a Cemu restart.
+        # Vulkan is already its Windows default, so api is not forced. Linux
+        # window size, console region/language, PulseAudio api and
+        # did_show_graphic_pack_download (dropped by Cemu 2.6) are not ported.
+        @{ Id = 'cemu'; App = 'cemu'; Format = 'xml'
+           Path = '%APPDATA%\Cemu\settings.xml'
+           Settings = @(
+               @{ XPath = 'fullscreen'; Value = 'true' }
+               @{ XPath = 'check_update'; Value = 'false' }
+               @{ XPath = 'use_discord_presence'; Value = 'false' }
+               @{ XPath = 'Graphic/VSync'; Value = '1' }
+               @{ XPath = 'Graphic/UpscaleFilter'; Value = '2' }
+               @{ XPath = 'GamePaths/Entry'; Value = '{{RomPath:wiiu}}' }
+           ) }
     )
-    # Per-game overrides -> <DuckStation dir>\gamesettings\<SERIAL>.ini. Same
-    # capability as ansible's dg_duckstation_per_game_settings; empty because
-    # the Linux entries are for the maintainer's own PS1 library.
+
+    # RetroArch per-core option files, under <folder of retroarch.cfg>\config.
+    # Created when missing (RetroArch only writes them after a core runs).
+    RetroarchCoreOptions = @(
+        @{ RelativePath = 'bsnes-hd beta\bsnes-hd beta.opt'
+           Settings = @(
+               @{ Key = 'bsnes_mode7_wsMode'; Value = '"all"' }
+               @{ Key = 'bsnes_mode7_widescreen'; Value = '"16:9"' }
+               @{ Key = 'bsnes_mode7_wsobj'; Value = '"unsafe"' }
+               @{ Key = 'bsnes_video_aspectcorrection'; Value = '"ON"' }
+           ) }
+        # melonDS's hardware renderer is OpenGL-only; guards against a black
+        # screen if the global video driver is vulkan or d3d11/d3d12.
+        @{ RelativePath = 'melonDS\melonDS.cfg'
+           Settings = @( @{ Key = 'video_driver'; Value = '"glcore"' } ) }
+        @{ RelativePath = 'melonDS\melonDS.opt'
+           Settings = @( @{ Key = 'melonds_opengl_renderer'; Value = '"enabled"' } ) }
+        @{ RelativePath = 'ParaLLEl N64\ParaLLEl N64.opt'
+           Settings = @(
+               @{ Key = 'parallel-n64-gfxplugin'; Value = '"parallel"' }
+               @{ Key = 'parallel-n64-rspplugin'; Value = '"parallel"' }
+           ) }
+    )
+
+    # Per-game DuckStation overrides -> <DuckStation dir>\gamesettings\<SERIAL>.ini.
+    # Empty: the Linux entries are for the maintainer's own PS1 library.
     # @{ Serial = 'SCUS-94455'; Settings = @(@{ Section='GPU'; Option='WidescreenHack'; Value='false' }) }
     DuckstationPerGameSettings = @()
 
-    # --- RetroArch -----------------------------------------------------------
-    # Installer default; config lives beside the exe. Core option files are
-    # resolved under <folder of retroarch.cfg>\config\.
-    RetroarchCfgPath = 'C:\RetroArch-Win64\retroarch.cfg'
-    RetroarchSettings = @(
-        # Xbox-style menu confirm/cancel. The Linux audio_driver=pulse override
-        # is not ported: RetroArch already defaults to a native Windows driver.
-        @{ Key = 'menu_swap_ok_cancel_buttons'; Value = '"true"' }
-    )
-    RetroarchCoreOptions = @(
-        @{
-            RelativePath = 'bsnes-hd beta\bsnes-hd beta.opt'
-            Settings = @(
-                @{ Key = 'bsnes_mode7_wsMode'; Value = '"all"' }
-                @{ Key = 'bsnes_mode7_widescreen'; Value = '"16:9"' }
-                @{ Key = 'bsnes_mode7_wsobj'; Value = '"unsafe"' }
-                @{ Key = 'bsnes_video_aspectcorrection'; Value = '"ON"' }
-            )
-        }
-        # melonDS's hardware renderer is OpenGL-only; guards against a black
-        # screen if the global video driver is vulkan or d3d11/d3d12.
-        @{
-            RelativePath = 'melonDS\melonDS.cfg'
-            Settings = @( @{ Key = 'video_driver'; Value = '"glcore"' } )
-        }
-        @{
-            RelativePath = 'melonDS\melonDS.opt'
-            Settings = @( @{ Key = 'melonds_opengl_renderer'; Value = '"enabled"' } )
-        }
-        @{
-            RelativePath = 'ParaLLEl N64\ParaLLEl N64.opt'
-            Settings = @(
-                @{ Key = 'parallel-n64-gfxplugin'; Value = '"parallel"' }
-                @{ Key = 'parallel-n64-rspplugin'; Value = '"parallel"' }
-            )
-        }
-    )
-
-    # --- Dolphin -------------------------------------------------------------
-    DolphinConfigDir = '%USERPROFILE%\Documents\Dolphin Emulator\Config'
-    # Same capability as ansible's dg_dolphin_configs; empty because the Linux
-    # profiles are for the maintainer's 8BitDo Ultimate 2 pads. Source is
-    # relative to this config/ directory:
+    # Dolphin controller profiles copied into its Config dir. Empty: the Linux
+    # profiles are for the maintainer's 8BitDo pads. Source is relative to config\.
     # @{ Source = 'dolphin-profiles\GCPadNew.ini'; Dest = 'GCPadNew.ini' }
+    DolphinConfigDir = '%USERPROFILE%\Documents\Dolphin Emulator\Config'
     DolphinControllerProfiles = @()
 
-    # --- GPU preference ------------------------------------------------------
-    # Windows analogue of ansible's dg_nvidia_enabled. Only acts when Windows
-    # reports more than one display adapter (iGPU + dGPU); on a single-GPU PC
-    # there is nothing to choose, so it is skipped automatically.
+    # Windows analogue of dg_nvidia_enabled: per-exe "High performance" GPU
+    # preference, applied only when Windows reports more than one GPU.
     PreferDiscreteGpu = $true
 }
