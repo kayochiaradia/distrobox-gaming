@@ -30,14 +30,15 @@ and [macos/INSTALL.md](macos/INSTALL.md).
 
 ## Windows
 
-`windows/` is a separate, native Windows 10/11 baseline — ES-DE plus Dolphin,
-PCSX2, DuckStation, PPSSPP and RetroArch, installed via `winget` and driven by
-PowerShell scripts (no Ansible control node, no Distrobox, no WSL). It shares
-no code with the Linux tree or with `macos/`. ES-DE already ships a complete
-Windows `es_systems.xml`, so unlike the other two stacks there is no XML to
-generate — the scripts install the apps and wire each one up so ES-DE can
-find it. See [windows/README.md](windows/README.md) and
-[windows/INSTALL.md](windows/INSTALL.md).
+`windows/` is a separate, native Windows 10/11 port covering every console and
+arcade system the Linux tree defines (43 ES-DE systems: Switch, PS1–PS4, PSP,
+Vita, GameCube/Wii/Wii U, 3DS/DS, Xbox/360, Dreamcast/NAOMI, Sega Model 1–3,
+the RetroArch retro systems and more). Emulators come from winget or their
+official GitHub releases, RetroArch cores from the libretro buildbot, and
+PowerShell scripts generate ES-DE's `custom_systems` configuration and apply
+the Linux emulator tuning that makes sense on Windows. No Ansible, Distrobox,
+WSL or Wine; it shares no code with the Linux tree or `macos/`. See
+[windows/README.md](windows/README.md) and [windows/INSTALL.md](windows/INSTALL.md).
 
 Everything else in this file describes the Linux distrobox.
 

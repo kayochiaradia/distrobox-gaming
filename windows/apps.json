@@ -1,97 +1,116 @@
 {
-  "_comment": "Windows-native baseline app list, in the same spirit as macos/Brewfile. Entries here are installed by install-apps.ps1 and checked/wired up by bootstrap.ps1. ES-DE ships its own Windows es_systems.xml covering all of these out of the box (registry + PATH + Emulators\\<dir>\\ detection) -- there is no custom XML to render, unlike macos/ and the Linux distrobox tree.",
+  "_comment": "Windows app list, the counterpart of the Linux packages.yml/install roles and macos/Brewfile. source=winget installs via winget (portable packages go to <EmulatorsRoot>\\<installDir>); source=github downloads the latest release asset matching assetPattern into <EmulatorsRoot>\\<installDir>; source=manual cannot be automated (the site blocks scripted downloads) and only prints instructions. emulatorNames are the ES-DE find-rule names bootstrap.ps1 writes into custom_systems\\es_find_rules.xml. uac=true means the installer asks for Administrator approval.",
   "apps": [
     {
-      "id": "esde",
-      "name": "ES-DE",
-      "role": "frontend",
-      "wingetId": "ES-DE.EmulationStation-DE",
-      "systems": [],
-      "exeNames": ["ES-DE.exe"],
-      "esdeEmulatorDir": null,
-      "registryAppPaths": [],
-      "registryUninstallKey": null,
-      "notes": "Frontend. Installer release puts its home directory at %USERPROFILE%\\ES-DE (see windows/README.md)."
+      "id": "esde", "name": "ES-DE", "role": "frontend",
+      "source": "winget", "wingetId": "ES-DE.EmulationStation-DE", "uac": true,
+      "exeNames": ["ES-DE.exe"], "emulatorNames": [], "systems": []
     },
     {
-      "id": "dolphin",
-      "name": "Dolphin",
-      "role": "emulator",
-      "wingetId": "DolphinEmulator.Dolphin",
-      "systems": ["gc", "wii"],
-      "exeNames": ["Dolphin.exe"],
-      "esdeEmulatorDir": "Dolphin-x64",
-      "registryAppPaths": [],
-      "registryUninstallKey": null,
-      "notes": "GameCube/Wii. ES-DE's find-rules only check PATH and %ESPATH%\\Emulators\\Dolphin-x64\\Dolphin.exe -- no registry rule. bootstrap.ps1 -Action Configure creates that junction automatically if Dolphin.exe isn't already on PATH."
-    },
-    {
-      "id": "pcsx2",
-      "name": "PCSX2",
-      "role": "emulator",
-      "wingetId": "PCSX2Team.PCSX2",
-      "systems": ["ps2"],
-      "exeNames": ["pcsx2-qt.exe", "pcsx2-qtx64.exe", "pcsx2-qtx64-avx2.exe"],
-      "esdeEmulatorDir": "PCSX2-Qt",
-      "registryAppPaths": [],
-      "registryUninstallKey": null,
-      "notes": "PlayStation 2. PATH and %ESPATH%\\Emulators\\PCSX2-Qt\\pcsx2-qt*.exe only -- no registry rule for the current Qt build."
-    },
-    {
-      "id": "duckstation",
-      "name": "DuckStation",
-      "role": "emulator",
-      "wingetId": "Stenzek.DuckStation",
-      "systems": ["psx"],
-      "exeNames": [
-        "duckstation-qt-x64-ReleaseLTCG.exe",
-        "duckstation-qt-x64-ReleaseLTCG-SSE2.exe",
-        "duckstation-nogui-x64-ReleaseLTCG.exe"
-      ],
-      "esdeEmulatorDir": "duckstation",
-      "registryAppPaths": [],
-      "registryUninstallKey": null,
-      "notes": "PlayStation 1. PATH and %ESPATH%\\Emulators\\duckstation\\<exe> only -- no registry rule."
-    },
-    {
-      "id": "ppsspp",
-      "name": "PPSSPP",
-      "role": "emulator",
-      "wingetId": "PPSSPPTeam.PPSSPP",
-      "systems": ["psp"],
-      "exeNames": ["PPSSPPWindows64.exe"],
-      "esdeEmulatorDir": "PPSSPP",
-      "registryAppPaths": [],
-      "registryUninstallKey": {
-        "path": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\PPSSPP_is1",
-        "valueName": "InstallLocation",
-        "exeName": "PPSSPPWindows64.exe"
-      },
-      "notes": "PSP. ES-DE reads InstallLocation from the PPSSPP_is1 uninstall key, so a normal installer-based winget install is usually auto-detected without a junction."
-    },
-    {
-      "id": "retroarch",
-      "name": "RetroArch",
-      "role": "emulator",
-      "wingetId": "Libretro.RetroArch",
-      "systems": ["multi-system: nes, snes, genesis, gba, gbc, atari2600, and many more via cores"],
-      "exeNames": ["retroarch.exe"],
-      "esdeEmulatorDir": "RetroArch-Win64",
+      "id": "retroarch", "name": "RetroArch", "role": "emulator",
+      "source": "winget", "wingetId": "Libretro.RetroArch", "uac": true,
+      "exeNames": ["retroarch.exe"], "emulatorNames": ["RETROARCH"],
       "registryAppPaths": ["retroarch.exe"],
-      "registryUninstallKey": null,
-      "notes": "Cores are NOT installed by winget -- open RetroArch once after install and use Online Updater > Core Downloader for the systems you want (see windows/README.md). ES-DE checks the App Paths registry entry the RetroArch installer registers, so it's usually auto-detected."
+      "systems": ["nes", "snes", "gb", "gbc", "gba", "n64", "mastersystem", "genesis", "gamegear", "sega32x", "megacd", "saturn", "neogeo", "cps", "cps2", "mame", "atari2600", "atari5200", "atari7800", "atarilynx", "atari800", "atarist"],
+      "notes": "Cores are installed separately by install-cores.ps1."
+    },
+    {
+      "id": "dolphin", "name": "Dolphin", "role": "emulator",
+      "source": "manual", "manualUrl": "https://dolphin-emu.org/download/", "installDir": "Dolphin-x64",
+      "exeNames": ["Dolphin.exe"], "emulatorNames": ["DOLPHIN"], "systems": ["gc", "wii"],
+      "notes": "dolphin-emu.org and its mirror answer 403 to scripted downloads, and winget only has the 2016 5.0 release. Download the latest release .7z in a browser and extract it so Dolphin.exe ends up in <EmulatorsRoot>\\Dolphin-x64\\."
+    },
+    {
+      "id": "pcsx2", "name": "PCSX2", "role": "emulator",
+      "source": "winget", "wingetId": "PCSX2Team.PCSX2", "uac": true,
+      "exeNames": ["pcsx2-qt.exe", "pcsx2-qtx64.exe", "pcsx2-qtx64-avx2.exe"], "emulatorNames": ["PCSX2"], "systems": ["ps2"]
+    },
+    {
+      "id": "duckstation", "name": "DuckStation", "role": "emulator",
+      "source": "winget", "wingetId": "Stenzek.DuckStation", "installDir": "duckstation",
+      "exeNames": ["duckstation-qt-x64-ReleaseLTCG.exe", "duckstation-qt-x64-ReleaseLTCG-SSE2.exe"], "emulatorNames": ["DUCKSTATION"], "systems": ["psx"]
+    },
+    {
+      "id": "ppsspp", "name": "PPSSPP", "role": "emulator",
+      "source": "winget", "wingetId": "PPSSPPTeam.PPSSPP", "uac": true,
+      "exeNames": ["PPSSPPWindows64.exe"], "emulatorNames": ["PPSSPP"], "systems": ["psp"],
+      "registryUninstallKey": { "path": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\PPSSPP_is1", "valueName": "InstallLocation", "exeName": "PPSSPPWindows64.exe" }
+    },
+    {
+      "id": "rpcs3", "name": "RPCS3", "role": "emulator",
+      "source": "github", "repo": "RPCS3/rpcs3-binaries-win", "assetPattern": "_win64_msvc\\.7z$", "installDir": "RPCS3",
+      "exeNames": ["rpcs3.exe"], "emulatorNames": ["RPCS3"], "systems": ["ps3"],
+      "notes": "Official RPCS3 Windows builds. Needs the PS3 firmware (PS3UPDAT.PUP) installed through its own GUI."
+    },
+    {
+      "id": "shadps4", "name": "shadPS4", "role": "emulator",
+      "source": "winget", "wingetId": "shadps4-emu.shadPS4", "installDir": "shadPS4",
+      "exeNames": ["shadPS4.exe"], "emulatorNames": ["SHADPS4"], "systems": ["ps4"]
+    },
+    {
+      "id": "eden", "name": "Eden", "role": "emulator",
+      "source": "winget", "wingetId": "Utopia.Eden.MinGW", "installDir": "eden",
+      "exeNames": ["eden.exe"], "emulatorNames": ["EDEN"], "systems": ["switch"],
+      "notes": "Needs your own prod.keys and firmware, same as on Linux."
+    },
+    {
+      "id": "cemu", "name": "Cemu", "role": "emulator",
+      "source": "winget", "wingetId": "Cemu.Cemu", "installDir": "cemu",
+      "exeNames": ["Cemu.exe"], "emulatorNames": ["CEMU"], "systems": ["wiiu"]
+    },
+    {
+      "id": "azahar", "name": "Azahar", "role": "emulator",
+      "source": "winget", "wingetId": "AzaharEmu.Azahar", "uac": true,
+      "exeNames": ["azahar.exe"], "emulatorNames": ["AZAHAR"], "systems": ["n3ds"]
+    },
+    {
+      "id": "melonds", "name": "melonDS", "role": "emulator",
+      "source": "winget", "wingetId": "melonDS.melonDS", "installDir": "melonDS",
+      "exeNames": ["melonDS.exe"], "emulatorNames": ["MELONDS"], "systems": ["nds"]
+    },
+    {
+      "id": "xemu", "name": "xemu", "role": "emulator",
+      "source": "winget", "wingetId": "xemu-project.xemu", "installDir": "xemu",
+      "exeNames": ["xemu.exe"], "emulatorNames": ["XEMU"], "systems": ["xbox"]
+    },
+    {
+      "id": "xenia", "name": "Xenia Canary", "role": "emulator",
+      "source": "winget", "wingetId": "Xenia.XeniaCanary", "installDir": "xenia_canary",
+      "exeNames": ["xenia_canary.exe"], "emulatorNames": ["XENIA"], "systems": ["xbox360"],
+      "notes": "Native on Windows -- the Linux tree needs Wine and Xenia Manager for this."
+    },
+    {
+      "id": "vita3k", "name": "Vita3K", "role": "emulator",
+      "source": "winget", "wingetId": "Vita3K.Vita3K", "installDir": "Vita3K",
+      "exeNames": ["Vita3K.exe"], "emulatorNames": ["VITA3K"], "systems": ["psvita"]
+    },
+    {
+      "id": "flycast", "name": "Flycast", "role": "emulator",
+      "source": "github", "repo": "flyinghead/flycast", "assetPattern": "^flycast-win64-.*\\.zip$", "installDir": "flycast",
+      "exeNames": ["flycast.exe"], "emulatorNames": ["FLYCAST"], "systems": ["dreamcast", "naomi", "naomi2"]
+    },
+    {
+      "id": "supermodel", "name": "Supermodel", "role": "emulator",
+      "source": "github", "repo": "trzy/Supermodel", "assetPattern": "-windows\\.zip$", "installDir": "Supermodel",
+      "exeNames": ["Supermodel.exe"], "emulatorNames": ["SUPERMODEL"], "systems": ["model3"]
+    },
+    {
+      "id": "mame", "name": "MAME", "role": "emulator",
+      "source": "winget", "wingetId": "MAMEdev.MAME", "installDir": "mame",
+      "exeNames": ["mame.exe"], "emulatorNames": ["MAME"], "systems": ["model1"],
+      "notes": "Runs Sega Model 1, and is an alternative emulator for Model 2/3 and the arcade systems."
+    },
+    {
+      "id": "m2emulator", "name": "Model 2 Emulator", "role": "emulator",
+      "source": "manual", "installDir": "m2emulator",
+      "exeNames": ["EMULATOR.EXE"], "emulatorNames": ["M2EMULATOR"], "systems": ["model2"],
+      "notes": "ElSemi's Model 2 Emulator has no official download host or release feed. Extract it so EMULATOR.EXE ends up in <EmulatorsRoot>\\m2emulator\\. configure-emulators.ps1 points its [RomDirs] at your model2 ROM folder. MAME is offered as an alternative emulator for model2 in ES-DE."
+    },
+    {
+      "id": "openbor", "name": "OpenBOR", "role": "emulator",
+      "source": "github", "repo": "DCurrent/openbor", "assetPattern": "^OpenBOR\\.v.*\\.rar$", "installDir": "OpenBOR",
+      "exeNames": ["OpenBOR.exe"], "emulatorNames": [], "systems": ["openbor"],
+      "notes": "On Windows ES-DE launches OpenBOR games as per-game folders with their own OpenBOR.exe (copy this engine into each game folder). See windows/README.md."
     }
-  ],
-  "future": [
-    { "wingetId": "shadps4-emu.shadPS4", "name": "shadPS4", "system": "ps4" },
-    { "wingetId": "RPCS3", "name": "RPCS3", "system": "ps3", "notes": "No winget package -- RPCS3 project policy is against third-party redistribution; download manually from rpcs3.net." },
-    { "wingetId": "Cemu.Cemu", "name": "Cemu", "system": "wiiu" },
-    { "wingetId": "AzaharEmu.Azahar", "name": "Azahar", "system": "3ds" },
-    { "wingetId": "Utopia.Eden.MinGW", "name": "Eden", "system": "switch", "notes": "Requires user-supplied decryption keys/firmware, same as upstream." },
-    { "wingetId": "Xenia.Xenia", "name": "Xenia", "system": "xbox360" },
-    { "wingetId": "xemu-project.xemu", "name": "xemu", "system": "xbox" },
-    { "wingetId": "Vita3K.Vita3K", "name": "Vita3K", "system": "psvita" },
-    { "wingetId": "HarbourMasters.ShipofHarkinian", "name": "Ship of Harkinian", "system": "n64-oot-recomp" },
-    { "wingetId": "HarbourMasters.2Ship2Harkinian", "name": "2 Ship 2 Harkinian", "system": "n64-mm-recomp" }
   ]
 }

@@ -1,130 +1,193 @@
 <#
 .SYNOPSIS
-    Installs (or lists/checks) the Windows-native distrobox-gaming app set via winget.
+    Installs (or lists/checks) every emulator in apps.json.
 
 .DESCRIPTION
-    Reads windows/apps.json and, for each entry under "apps", installs the winget
-    package. Equivalent to macos/install-apps.sh driving the Brewfile, but for
-    winget. Never touches the "future" list -- those are documented, not installed.
+    Counterpart of the Linux bootstrap_packages/install_* roles and
+    macos/install-apps.sh. Three sources, per apps.json entry:
 
-.PARAMETER List
-    Print the app list (id, name, winget id) and exit. Installs nothing.
+      winget  -- winget install; portable (zip) packages are placed in
+                 <EmulatorsRoot>\<installDir> (default %USERPROFILE%\Emulators)
+      github  -- latest release asset matching assetPattern, extracted with
+                 Windows' built-in tar.exe into <EmulatorsRoot>\<installDir>
+      manual  -- the site blocks scripted downloads; prints where to put it
 
-.PARAMETER Check
-    Report which apps are already installed per `winget list --id`, without
-    installing or changing anything.
+    Already-installed apps are skipped (use -Update to refresh GitHub-sourced
+    ones). Nothing is ever uninstalled.
+
+.PARAMETER Only
+    Limit to these app ids, e.g. -Only rpcs3,flycast
 
 .EXAMPLE
     ./install-apps.ps1
-    ./install-apps.ps1 -List
     ./install-apps.ps1 -Check
+    ./install-apps.ps1 -Only rpcs3 -Update
 #>
 [CmdletBinding()]
 param(
     [switch]$List,
-    [switch]$Check
+    [switch]$Check,
+    [switch]$Update,
+    [string[]]$Only,
+    [string]$ConfigPath
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$appsJsonPath = Join-Path $scriptRoot 'apps.json'
+. (Join-Path $scriptRoot 'lib\common.ps1')
 
-if (-not (Test-Path $appsJsonPath)) {
-    throw "apps.json not found at $appsJsonPath"
+$config = Get-DgConfig -ConfigPath $ConfigPath -ScriptRoot $scriptRoot
+$emulatorsRoot = $config.EmulatorsRoot
+$apps = @(Get-DgApps -ScriptRoot $scriptRoot)
+if ($Only) {
+    $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $unknown = $Only | Where-Object { $_ -notin $apps.id }
+    if ($unknown) { throw "Unknown app id(s): $($unknown -join ', '). Valid: $($apps.id -join ', ')" }
+    $apps = @($apps | Where-Object { $_.id -in $Only })
 }
-
-$manifest = Get-Content -Raw -Path $appsJsonPath | ConvertFrom-Json
-$apps = $manifest.apps
 
 if ($List) {
     $apps | ForEach-Object {
         [PSCustomObject]@{
-            Id       = $_.id
-            Name     = $_.name
-            WingetId = $_.wingetId
-            Role     = $_.role
+            Id      = $_.id
+            Name    = $_.name
+            Source  = $_.source
+            From    = if ($_.wingetId) { $_.wingetId } elseif ($_.repo) { "github:$($_.repo)" } else { $_.manualUrl }
+            Systems = ($_.systems -join ' ')
         }
-    } | Format-Table -AutoSize
+    } | Format-Table -AutoSize -Wrap
     return
-}
-
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    throw "winget was not found on PATH. Install 'App Installer' from the Microsoft Store first."
-}
-
-function Test-WingetInstalled {
-    param([string]$WingetId)
-    $result = winget list --id $WingetId --exact --source winget 2>$null
-    return ($LASTEXITCODE -eq 0) -and ($result -match [regex]::Escape($WingetId))
 }
 
 if ($Check) {
-    $rows = $apps | ForEach-Object {
-        [PSCustomObject]@{
-            Id        = $_.id
-            Name      = $_.name
-            WingetId  = $_.wingetId
-            Installed = Test-WingetInstalled -WingetId $_.wingetId
-        }
+    $rows = foreach ($app in $apps) {
+        $exe = Resolve-AppRealExePath -App $app -EmulatorsRoot $emulatorsRoot
+        [PSCustomObject]@{ Id = $app.id; Name = $app.name; Source = $app.source; Installed = [bool]$exe; Path = $exe }
     }
     $rows | Format-Table -AutoSize
-    $missing = $rows | Where-Object { -not $_.Installed }
-    if ($missing) {
-        Write-Host "`nMissing: $($missing.Name -join ', ')" -ForegroundColor Yellow
-    } else {
-        Write-Host "`nAll apps in apps.json are installed." -ForegroundColor Green
-    }
+    $missing = @($rows | Where-Object { -not $_.Installed })
+    if ($missing) { Write-Host "Missing: $($missing.Name -join ', ')" -ForegroundColor Yellow }
+    else { Write-Host 'All apps are installed.' -ForegroundColor Green }
     return
 }
 
-Write-Host "Installing $($apps.Count) app(s) via winget..." -ForegroundColor Cyan
-Write-Host "Several of these installers require Administrator elevation (a UAC prompt)." -ForegroundColor DarkGray
-Write-Host "Run this script from a normal interactive PowerShell window so you can approve it.`n" -ForegroundColor DarkGray
+# ---------------------------------------------------------------------------
+# Installers
+# ---------------------------------------------------------------------------
 
-# Known winget/installer failure signatures, and the actionable hint to print
-# for each. winget's own error text varies by installer technology
-# (Inno Setup vs NSIS vs MSI) but these substrings are stable across runs --
-# confirmed against real failures on 2026-09-17 (ES-DE, PCSX2, PPSSPP,
-# RetroArch all hit the elevation case; Dolphin hit the mirror case).
 $knownFailures = @(
-    @{
-        Match = 'canceled by the user|You cancelled the installation|ERROR_INSTALL_USERCANCEL'
-        Hint  = "requires Administrator elevation (UAC) that couldn't be approved in this session -- rerun this script from an interactive PowerShell window and accept the UAC prompt."
-    },
-    @{
-        Match = 'Forbidden \(403\)|Download request status is not success'
-        Hint  = "the upstream download mirror refused the request (HTTP 403). This is not a winget/script bug -- retry later, or download it manually from the project's own site."
-    }
+    @{ Match = 'canceled by the user|You cancelled the installation|ERROR_INSTALL_USERCANCEL'
+       Hint  = 'needs Administrator approval (UAC). Rerun from an interactive PowerShell window and accept the prompt.' }
+    @{ Match = 'Forbidden \(403\)|Download request status is not success'
+       Hint  = 'the download server refused the request (HTTP 403). Retry later or download it manually.' }
+    @{ Match = 'No applicable installer found'
+       Hint  = 'winget has no installer for this machine/scope.' }
 )
 
-$failures = @()
-foreach ($app in $apps) {
-    if (Test-WingetInstalled -WingetId $app.wingetId) {
-        Write-Host "[skip] $($app.name) ($($app.wingetId)) already installed" -ForegroundColor DarkGray
-        continue
+function Install-FromWinget {
+    param($App)
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        throw "winget was not found. Install 'App Installer' from the Microsoft Store."
     }
-    Write-Host "[install] $($app.name) ($($app.wingetId))" -ForegroundColor Cyan
-    $output = & winget install --id $app.wingetId --exact --silent `
-        --accept-package-agreements --accept-source-agreements --source winget 2>&1
-    $output | ForEach-Object { Write-Host $_ }
+    $wingetArgs = @('install', '--id', $App.wingetId, '--exact', '--silent', '--source', 'winget',
+        '--accept-package-agreements', '--accept-source-agreements')
+    if ($App.installDir) {
+        $wingetArgs += @('--location', (Join-Path $emulatorsRoot $App.installDir))
+    }
+    $output = & winget @wingetArgs 2>&1
+    $output | ForEach-Object { Write-Host "    $_" }
+
+    # A portable install that failed midway can leave winget believing the
+    # package is installed with no files on disk. The caller only gets here
+    # when the exe is missing, so drop the orphaned registration and retry.
+    if ($LASTEXITCODE -ne 0 -and ($output -join "`n") -match 'existing package already installed') {
+        Write-Host '    winget has a stale registration with no files; removing it and retrying' -ForegroundColor Yellow
+        & winget uninstall --id $App.wingetId --exact --silent --source winget 2>&1 | ForEach-Object { Write-Host "    $_" }
+        $output = & winget @wingetArgs 2>&1
+        $output | ForEach-Object { Write-Host "    $_" }
+    }
 
     if ($LASTEXITCODE -ne 0) {
-        $outputText = $output -join "`n"
-        $hint = ($knownFailures | Where-Object { $outputText -match $_.Match } | Select-Object -First 1).Hint
-        if ($hint) {
-            Write-Host "[FAILED] $($app.name): $hint" -ForegroundColor Red
-        } else {
-            Write-Host "[FAILED] $($app.name) exited with code $LASTEXITCODE" -ForegroundColor Red
-        }
+        $text = $output -join "`n"
+        $hint = ($knownFailures | Where-Object { $text -match $_.Match } | Select-Object -First 1).Hint
+        if (-not $hint) { $hint = "winget exited with code $LASTEXITCODE." }
+        throw $hint
+    }
+}
+
+function Install-FromGitHub {
+    param($App)
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$($App.repo)/releases/latest" `
+        -Headers @{ 'User-Agent' = 'distrobox-gaming-windows' }
+    $asset = $release.assets | Where-Object { $_.name -match $App.assetPattern } | Select-Object -First 1
+    if (-not $asset) { throw "no asset matching '$($App.assetPattern)' in $($App.repo) release $($release.tag_name)" }
+
+    $dest = Join-Path $emulatorsRoot $App.installDir
+    $marker = Join-Path $dest '.dg-release'
+    if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $release.tag_name)) {
+        Write-Host "    already at $($release.tag_name)" -ForegroundColor DarkGray
+        return
+    }
+
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("dg-" + [Guid]::NewGuid().ToString('N') + '-' + $asset.name)
+    try {
+        Write-Host "    downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB, $($release.tag_name))"
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp -UseBasicParsing `
+            -Headers @{ 'User-Agent' = 'distrobox-gaming-windows' }
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        & "$env:SystemRoot\System32\tar.exe" -xf $tmp -C $dest
+        if ($LASTEXITCODE -ne 0) { throw "tar.exe could not extract $($asset.name) (exit $LASTEXITCODE)" }
+        Set-Content -Path $marker -Value $release.tag_name -Encoding ASCII
+    }
+    finally {
+        Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Host "Emulators root: $emulatorsRoot" -ForegroundColor Cyan
+if ($apps | Where-Object { $_.uac }) {
+    Write-Host 'Some installers ask for Administrator approval (UAC) -- run this from an interactive window.' -ForegroundColor DarkGray
+}
+
+$failures = @()
+$manual = @()
+foreach ($app in $apps) {
+    $existing = Resolve-AppRealExePath -App $app -EmulatorsRoot $emulatorsRoot
+    $refresh = $Update -and $app.source -eq 'github'
+    if ($existing -and -not $refresh) {
+        Write-Host "[skip] $($app.name): $existing" -ForegroundColor DarkGray
+        continue
+    }
+
+    Write-Host "[$($app.source)] $($app.name)" -ForegroundColor Cyan
+    if ($app.source -eq 'manual') {
+        $target = Join-Path (Join-Path $emulatorsRoot $app.installDir) $app.exeNames[0]
+        Write-Host "    manual install required -> $target" -ForegroundColor Yellow
+        if ($app.manualUrl) { Write-Host "    download: $($app.manualUrl)" -ForegroundColor Yellow }
+        Write-Host "    $($app.notes)" -ForegroundColor Yellow
+        $manual += $app.name
+        continue
+    }
+    try {
+        if ($app.source -eq 'winget') { Install-FromWinget -App $app }
+        elseif ($app.source -eq 'github') { Install-FromGitHub -App $app }
+        else { throw "unknown source '$($app.source)'" }
+        $installed = Resolve-AppRealExePath -App $app -EmulatorsRoot $emulatorsRoot
+        if (-not $installed) { throw "installer finished but none of $($app.exeNames -join ', ') was found" }
+        Write-Host "    ok: $installed" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[FAILED] $($app.name): $($_.Exception.Message)" -ForegroundColor Red
         $failures += $app.name
     }
 }
 
+if ($manual) { Write-Host "`nManual downloads still needed: $($manual -join ', ')" -ForegroundColor Yellow }
 if ($failures) {
-    Write-Host "`nFailed to install: $($failures -join ', ')" -ForegroundColor Red
-    Write-Host "Rerun ./install-apps.ps1 after addressing the above -- already-installed apps are skipped." -ForegroundColor Yellow
+    Write-Host "Failed: $($failures -join ', '). Rerun after fixing -- installed apps are skipped." -ForegroundColor Red
     exit 1
 }
-
-Write-Host "`nDone. Next: run ./bootstrap.ps1 -Action Check, then -Action Configure." -ForegroundColor Green
+Write-Host "`nDone. Next: ./install-cores.ps1, then ./bootstrap.ps1 -Action Configure." -ForegroundColor Green

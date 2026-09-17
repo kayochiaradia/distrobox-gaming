@@ -77,33 +77,34 @@ concerns into the Linux roles, or vice versa. See `macos/README.md`.
 
 ### Windows (`windows/`, separate stack)
 
-`windows/` is a native Windows 10/11 baseline that shares **no** code with the
-Linux tree or with `macos/`. No Ansible (there is no supported Ansible
-control node on Windows), no Distrobox, no WSL, no Wine/Proton — Windows
-games just run, so nothing from the Linux Wine/mod-manager roles is
-reproduced. Orchestration is plain PowerShell: `windows/install-apps.ps1`
-installs `windows/apps.json`'s app list via `winget` (ES-DE, Dolphin, PCSX2,
-DuckStation, PPSSPP, RetroArch), and `windows/bootstrap.ps1 {Check,Configure}`
-verifies/wires up emulator discovery and ROM directory layout, and
-`windows/configure-emulators.ps1 {Check,Configure}` is the counterpart of
-`seed_configs` + `gpu.yml`: it applies `windows/config/emulators.psd1` to each
-emulator's own INI/cfg (only files the emulator already wrote, with
-`.bak.<timestamp>` backups) and sets a per-exe GPU preference only on
-multi-GPU PCs. `emulators.psd1` deliberately omits Linux-only settings
-(Vulkan/ICD forcing, PulseAudio, container locale, NAS read-ahead), values
-equal to the Windows default, and keys absent from current emulator builds —
-see the "What was not ported" table in `windows/README.md` before porting
-more. Shared detection helpers live in `windows/lib/common.ps1`. Config
-`.psd1` files use `%VAR%` placeholders, never `$env:` (rejected by
-`Import-PowerShellDataFile`). Unlike the
-Linux tree and `macos/`, there is no custom `es_systems.xml` to render — ES-DE
-already ships a complete one for Windows; `bootstrap.ps1` only creates a
-directory junction under `<EsdeHome>\Emulators\<name>\` for emulators ES-DE's
-own find-rules (PATH/registry) can't already see. Its integration test is
-`pwsh windows/tests/verify.ps1`, which runs the real script against a
-temporary sandbox directory and never calls `winget` or touches the user's
-actual ES-DE install. Do not fold Windows concerns into the Linux roles or
-the macOS scripts, or vice versa. See `windows/README.md`.
+`windows/` is a native Windows 10/11 port of every console/arcade system in
+`ansible/group_vars/all/esde.yml`, sharing **no** code with the Linux tree or
+`macos/`. No Ansible (no supported control node on Windows), Distrobox, WSL or
+Wine. Plain PowerShell 5.1 scripts, each with a preview mode:
+
+- `install-apps.ps1` — installs `windows/apps.json` (sources: `winget`,
+  `github` latest-release asset extracted with `tar.exe`, `manual` for sites
+  that block scripted downloads: Dolphin, Model 2 Emulator). Portable installs
+  go to `%USERPROFILE%\Emulators\<installDir>`.
+- `install-cores.ps1` — RetroArch cores referenced in `esde-systems.psd1` plus
+  `config/retroarch-cores.psd1` extras, from the libretro buildbot.
+- `bootstrap.ps1` — counterpart of `configure_esde`: renders
+  `config/esde-systems.psd1` into `%USERPROFILE%\ES-DE\custom_systems\es_systems.xml`
+  and writes `es_find_rules.xml` with the resolved exe of each installed app
+  (keyed by `emulatorNames`). `%ESPATH%` is the ES-DE binary dir, so never rely
+  on its `Emulators\` static paths.
+- `configure-emulators.ps1` — counterpart of `seed_configs` + `gpu.yml`,
+  applying `config/emulators.psd1` to files the emulator already wrote.
+  It deliberately omits Linux-only settings, values equal to the Windows
+  default and keys missing from current builds; see "What was not ported" in
+  `windows/README.md` before porting more.
+
+Shared helpers: `windows/lib/common.ps1`. `.psd1` files use `%VAR%`
+placeholders, never `$env:`; `esde-systems.psd1` is loaded without expansion
+(`%ROM%` etc. are ES-DE variables). Test: `windows/tests/verify.ps1` — runs the
+real scripts on temp dirs, no network; it fails if a Linux ES-DE system is
+missing on Windows or a default emulator has no app. Do not fold Windows
+concerns into the Linux roles or the macOS scripts, or vice versa.
 
 ### Helper scripts and config sources
 

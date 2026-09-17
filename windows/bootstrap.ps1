@@ -1,35 +1,25 @@
 <#
 .SYNOPSIS
-    Check or configure the native Windows distrobox-gaming baseline.
+    Wire every installed emulator and ROM folder into ES-DE.
 
 .DESCRIPTION
-    Windows equivalent of macos/bootstrap.sh {check|configure}. Does NOT call
-    winget and does NOT install anything -- run install-apps.ps1 first. This
-    script only:
+    Windows counterpart of the Linux configure_esde role and
+    macos/bootstrap.sh. Writes two files into <EsdeHome>\custom_systems\:
 
-      1. Reports whether ES-DE's own find-rules can already locate each
-         installed emulator (PATH, registry, or the Emulators\<dir>\ static
-         path ES-DE already ships on Windows).
-      2. In -Action Configure, creates a directory junction under
-         "<EsdeHome>\Emulators\<dir>\" pointing at the real winget install
-         location for any emulator ES-DE can't already see -- no PATH
-         mutation, no registry writes, fully reversible (delete the junction).
-      3. Reports (Check) or optionally creates (Configure, opt-in) the
-         per-system ROM directories under RomRoot/RomPaths.
+      es_find_rules.xml  one staticpath rule per installed emulator, pointing
+                         at the real exe (ES-DE merges it with its bundled
+                         rules, so nothing depends on PATH, junctions or where
+                         winget happened to put a package)
+      es_systems.xml     every system from config/esde-systems.psd1 with its
+                         ROM folder and default emulator; it overrides only
+                         those systems in ES-DE's bundled list
 
-    ES-DE ships a complete Windows es_systems.xml out of the box, so unlike
-    macos/ and the Linux distrobox tree, there is no XML to render here.
+    Also reports (or, with CreateRomDirs, creates) the per-system ROM folders.
+    Existing files are backed up as <file>.bak.<timestamp> before a change.
+    Never installs anything -- run install-apps.ps1 first.
 
 .PARAMETER Action
-    'Check' (default) previews without writing anything. 'Configure' applies
-    junctions and, if CreateRomDirs is set, creates missing ROM directories.
-
-.PARAMETER ConfigPath
-    Path to a localhost.psd1 override (see config/localhost.example.psd1).
-    Defaults to config/localhost.psd1 next to this script if present.
-
-.PARAMETER CreateRomDirs
-    Overrides the CreateRomDirs value from the config file for this run.
+    'Check' (default) previews without writing. 'Configure' writes.
 
 .EXAMPLE
     ./bootstrap.ps1 -Action Check
@@ -42,136 +32,146 @@ param(
 
     [string]$ConfigPath,
 
-    [Nullable[bool]]$CreateRomDirs = $null,
-
-    [string]$EsdeHomeOverride,
-    [string]$RomRootOverride
+    [Nullable[bool]]$CreateRomDirs = $null
 )
 
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'lib\common.ps1')
 
-# ---------------------------------------------------------------------------
-# Load config
-# ---------------------------------------------------------------------------
-
-$defaultConfigPath = Join-Path $scriptRoot 'config\localhost.psd1'
-if (-not $ConfigPath) { $ConfigPath = $defaultConfigPath }
-
-$config = @{
-    EsdeHome      = "$env:USERPROFILE\ES-DE"
-    RomRoot       = "$env:USERPROFILE\ES-DE\ROMs"
-    RomPaths      = @{}
-    CreateRomDirs = $false
-}
-
-if (Test-Path $ConfigPath) {
-    $userConfig = Import-ConfigDataFile -Path $ConfigPath
-    foreach ($key in $userConfig.Keys) { $config[$key] = $userConfig[$key] }
-    Write-Verbose "Loaded overrides from $ConfigPath"
-}
-
-if ($EsdeHomeOverride) { $config.EsdeHome = $EsdeHomeOverride }
-if ($RomRootOverride) { $config.RomRoot = $RomRootOverride }
+$apply = $Action -eq 'Configure'
+$config = Get-DgConfig -ConfigPath $ConfigPath -ScriptRoot $scriptRoot
 if ($null -ne $CreateRomDirs) { $config.CreateRomDirs = $CreateRomDirs }
 
-$esdeHome = $config.EsdeHome
-$romRoot = $config.RomRoot
+$apps = @(Get-DgApps -ScriptRoot $scriptRoot)
+$systems = (Import-PowerShellDataFile -Path (Join-Path $scriptRoot 'config\esde-systems.psd1')).Systems
+$customDir = Join-Path $config.EsdeHome 'custom_systems'
 
-# ---------------------------------------------------------------------------
-# Load apps.json
-# ---------------------------------------------------------------------------
+function ConvertTo-XmlText { param([string]$Text) [Security.SecurityElement]::Escape($Text) }
 
-$appsJsonPath = Join-Path $scriptRoot 'apps.json'
-$manifest = Get-Content -Raw -Path $appsJsonPath | ConvertFrom-Json
-$apps = $manifest.apps
-
-# ---------------------------------------------------------------------------
-# Emulator detection / junction wiring
-# ---------------------------------------------------------------------------
-
-Write-Host "`n== Emulator detection (ESDE home: $esdeHome) ==" -ForegroundColor Cyan
-
-$emulatorRows = @()
-foreach ($app in $apps) {
-    $detected = Test-AppDetected -App $app -EsdeHome $esdeHome
-    $row = [PSCustomObject]@{
-        Name      = $app.name
-        Detected  = $detected
-        Action    = ''
+function Write-GeneratedFile {
+    param([string]$Path, [string]$Content, [string]$Label)
+    [void][xml]$Content
+    $current = if ([IO.File]::Exists($Path)) { [IO.File]::ReadAllText($Path) } else { $null }
+    if ($current -eq $Content) {
+        Write-Host "[$Label] $Path is up to date" -ForegroundColor Green
+        return
     }
-
-    if (-not $detected -and $app.esdeEmulatorDir) {
-        if ($Action -eq 'Configure') {
-            $foundExe = Find-InstalledExe -App $app
-            $foundDir = if ($foundExe) { Split-Path -Parent $foundExe } else { $null }
-            if ($foundDir) {
-                $junctionPath = Get-EsdeJunctionPath -App $app -EsdeHome $esdeHome
-                $emulatorsDir = Split-Path -Parent $junctionPath
-                if (-not (Test-Path $emulatorsDir)) {
-                    New-Item -ItemType Directory -Path $emulatorsDir -Force | Out-Null
-                }
-                if (-not (Test-Path $junctionPath)) {
-                    New-Item -ItemType Junction -Path $junctionPath -Target $foundDir | Out-Null
-                    $row.Action = "linked -> $foundDir"
-                } else {
-                    $row.Action = 'junction already present'
-                }
-                $row.Detected = $true
-            } else {
-                $row.Action = 'not found under Program Files / WinGet packages -- install it or set the path manually'
-            }
-        } else {
-            $row.Action = 'run -Action Configure to auto-link, or install it if missing'
-        }
+    if (-not $apply) {
+        Write-Host "[$Label] $Path would be $(if ($current) { 'updated' } else { 'created' })" -ForegroundColor Yellow
+        return
     }
-
-    $emulatorRows += $row
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
+    if ($null -ne $current) {
+        [IO.File]::Copy($Path, "$Path.bak.$(Get-Date -Format 'yyyyMMddHHmmss')", $true)
+    }
+    [IO.File]::WriteAllText($Path, $Content, (New-Object Text.UTF8Encoding $false))
+    Write-Host "[$Label] $Path $(if ($current) { 'updated (previous version backed up)' } else { 'created' })" -ForegroundColor Yellow
 }
 
-$emulatorRows | Format-Table -AutoSize
-
 # ---------------------------------------------------------------------------
-# ROM directory layout
+# Emulators
 # ---------------------------------------------------------------------------
 
-Write-Host "`n== ROM directories (root: $romRoot) ==" -ForegroundColor Cyan
+Write-Host "`n== Emulators (root: $($config.EmulatorsRoot)) ==" -ForegroundColor Cyan
 
-$systemIds = $apps |
-    ForEach-Object { $_.systems } |
-    Where-Object { $_ -and ($_ -match '^[a-z0-9_-]+$') } |
-    Select-Object -Unique
+$rows = foreach ($app in $apps) {
+    [PSCustomObject]@{
+        Name    = $app.name
+        Systems = ($app.systems -join ' ')
+        Path    = Resolve-AppRealExePath -App $app -EmulatorsRoot $config.EmulatorsRoot
+        App     = $app
+    }
+}
+$rows | Select-Object Name, @{ n = 'Installed'; e = { [bool]$_.Path } }, Path | Format-Table -AutoSize
 
-$romRows = @()
-foreach ($sys in $systemIds) {
-    $path = if ($config.RomPaths.ContainsKey($sys)) { $config.RomPaths[$sys] } else { Join-Path $romRoot $sys }
-    $exists = Test-Path $path
+$missing = @($rows | Where-Object { -not $_.Path })
+if ($missing) {
+    Write-Host "Not installed: $($missing.Name -join ', ') -- their systems stay listed in ES-DE but won't launch until installed (./install-apps.ps1)." -ForegroundColor Yellow
+}
+
+# ---------------------------------------------------------------------------
+# es_find_rules.xml
+# ---------------------------------------------------------------------------
+
+Write-Host "`n== ES-DE configuration ($customDir) ==" -ForegroundColor Cyan
+
+$sb = New-Object Text.StringBuilder
+[void]$sb.AppendLine('<?xml version="1.0"?>')
+[void]$sb.AppendLine('<!-- Generated by distrobox-gaming windows/bootstrap.ps1. Manual edits are overwritten (a backup is kept). -->')
+[void]$sb.AppendLine('<ruleList>')
+foreach ($row in $rows | Where-Object { $_.Path }) {
+    foreach ($emuName in $row.App.emulatorNames) {
+        [void]$sb.AppendLine("    <emulator name=""$(ConvertTo-XmlText $emuName)"">")
+        [void]$sb.AppendLine('        <rule type="staticpath">')
+        [void]$sb.AppendLine("            <entry>$(ConvertTo-XmlText $row.Path)</entry>")
+        [void]$sb.AppendLine('        </rule>')
+        [void]$sb.AppendLine('    </emulator>')
+    }
+}
+[void]$sb.AppendLine('</ruleList>')
+Write-GeneratedFile -Path (Join-Path $customDir 'es_find_rules.xml') -Content $sb.ToString() -Label 'find rules'
+
+# ---------------------------------------------------------------------------
+# es_systems.xml
+# ---------------------------------------------------------------------------
+
+function Get-RomPath {
+    param([string]$System)
+    if ($config.RomPaths -and $config.RomPaths.ContainsKey($System)) { return $config.RomPaths[$System] }
+    return Join-Path $config.RomRoot $System
+}
+
+$sb = New-Object Text.StringBuilder
+[void]$sb.AppendLine('<?xml version="1.0"?>')
+[void]$sb.AppendLine('<!-- Generated by distrobox-gaming windows/bootstrap.ps1 from config/esde-systems.psd1. Manual edits are overwritten (a backup is kept). -->')
+[void]$sb.AppendLine('<systemList>')
+foreach ($s in $systems) {
+    [void]$sb.AppendLine('    <system>')
+    [void]$sb.AppendLine("        <name>$(ConvertTo-XmlText $s.Name)</name>")
+    [void]$sb.AppendLine("        <fullname>$(ConvertTo-XmlText $s.FullName)</fullname>")
+    [void]$sb.AppendLine("        <path>$(ConvertTo-XmlText (Get-RomPath -System $s.Name))</path>")
+    [void]$sb.AppendLine("        <extension>$(ConvertTo-XmlText $s.Extension)</extension>")
+    foreach ($c in $s.Commands) {
+        [void]$sb.AppendLine("        <command label=""$(ConvertTo-XmlText $c.Label)"">$(ConvertTo-XmlText $c.Cmd)</command>")
+    }
+    [void]$sb.AppendLine("        <platform>$(ConvertTo-XmlText $s.Platform)</platform>")
+    [void]$sb.AppendLine("        <theme>$(ConvertTo-XmlText $s.Theme)</theme>")
+    [void]$sb.AppendLine('    </system>')
+}
+[void]$sb.AppendLine('</systemList>')
+Write-GeneratedFile -Path (Join-Path $customDir 'es_systems.xml') -Content $sb.ToString() -Label 'systems'
+
+# ---------------------------------------------------------------------------
+# ROM directories
+# ---------------------------------------------------------------------------
+
+Write-Host "`n== ROM directories (root: $($config.RomRoot)) ==" -ForegroundColor Cyan
+
+$romRows = foreach ($s in $systems) {
+    $path = Get-RomPath -System $s.Name
+    $exists = [IO.Directory]::Exists($path)
     $created = $false
-
-    if (-not $exists -and $Action -eq 'Configure' -and $config.CreateRomDirs) {
-        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    if (-not $exists -and $apply -and $config.CreateRomDirs) {
+        [void][IO.Directory]::CreateDirectory($path)
         $exists = $true
         $created = $true
     }
+    [PSCustomObject]@{ System = $s.Name; Path = $path; Exists = $exists; Created = $created }
+}
 
-    $romRows += [PSCustomObject]@{
-        System  = $sys
-        Path    = $path
-        Exists  = $exists
-        Created = $created
+$missingRoms = @($romRows | Where-Object { -not $_.Exists })
+$createdRoms = @($romRows | Where-Object { $_.Created })
+Write-Host "$($romRows.Count - $missingRoms.Count) of $($romRows.Count) system folders exist$(if ($createdRoms) { " ($($createdRoms.Count) created)" })."
+if ($missingRoms) {
+    Write-Host "Missing: $($missingRoms.System -join ', ')" -ForegroundColor Yellow
+    if (-not $config.CreateRomDirs) {
+        Write-Host "Missing folders are only reported. Set CreateRomDirs = `$true in config\localhost.psd1 (or pass -CreateRomDirs `$true) to create them." -ForegroundColor Yellow
     }
 }
 
-$romRows | Sort-Object System | Format-Table -AutoSize
-
-$missingRoms = $romRows | Where-Object { -not $_.Exists }
-if ($missingRoms -and -not $config.CreateRomDirs) {
-    Write-Host "Missing ROM directories are only reported, never created -- set CreateRomDirs: `$true in $ConfigPath to opt in." -ForegroundColor Yellow
-}
-
-if ($Action -eq 'Check') {
-    Write-Host "`nCheck complete. Nothing was written. Run with -Action Configure to apply." -ForegroundColor Green
+if ($apply) {
+    Write-Host "`nConfigure complete. Restart ES-DE to pick up the changes." -ForegroundColor Green
 } else {
-    Write-Host "`nConfigure complete." -ForegroundColor Green
+    Write-Host "`nCheck complete. Nothing was written. Run with -Action Configure to apply." -ForegroundColor Green
 }

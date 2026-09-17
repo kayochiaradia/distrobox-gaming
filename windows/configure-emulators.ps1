@@ -45,18 +45,9 @@ $apply = $Action -eq 'Configure'
 # Config
 # ---------------------------------------------------------------------------
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $scriptRoot 'config\localhost.psd1' }
 if (-not $EmulatorsConfigPath) { $EmulatorsConfigPath = Join-Path $scriptRoot 'config\emulators.psd1' }
 
-$config = @{
-    EsdeHome            = "$env:USERPROFILE\ES-DE"
-    BiosRoot            = "$env:USERPROFILE\ES-DE\BIOS"
-    EmulatorConfigPaths = @{}
-}
-if (Test-Path $ConfigPath) {
-    $userConfig = Import-ConfigDataFile -Path $ConfigPath
-    foreach ($key in $userConfig.Keys) { $config[$key] = $userConfig[$key] }
-}
+$config = Get-DgConfig -ConfigPath $ConfigPath -ScriptRoot $scriptRoot
 
 $emu = Import-ConfigDataFile -Path $EmulatorsConfigPath
 if ($config.ContainsKey('PreferDiscreteGpu')) { $emu.PreferDiscreteGpu = $config.PreferDiscreteGpu }
@@ -295,9 +286,9 @@ if ($emu.PreferDiscreteGpu) {
     if ($gpus.Count -lt 2) {
         Write-Host "[skip] only one GPU found ($($gpus.Name -join ', ')) -- nothing to prefer" -ForegroundColor DarkGray
     } else {
-        $apps = (Get-Content -Raw -Path (Join-Path $scriptRoot 'apps.json') | ConvertFrom-Json).apps
+        $apps = Get-DgApps -ScriptRoot $scriptRoot | Where-Object { $_.role -eq 'emulator' }
         foreach ($app in $apps) {
-            $exe = Resolve-AppRealExePath -App $app -EsdeHome $config.EsdeHome
+            $exe = Resolve-AppRealExePath -App $app -EmulatorsRoot $config.EmulatorsRoot
             if (-not $exe) {
                 Write-Host "[skip] $($app.name): not installed" -ForegroundColor DarkGray
                 continue

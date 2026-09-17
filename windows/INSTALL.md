@@ -1,176 +1,152 @@
 # Installing on Windows 10/11
 
-This guide covers the first phase of Windows support. The commands are meant
-to be run on the target PC, in PowerShell; reading this document installs
-nothing.
+Run these steps on the target PC, in an **interactive** PowerShell window
+(some installers show a UAC prompt you need to approve). Reading this document
+installs nothing. See [README.md](README.md) for the system list and design.
 
-## What gets installed
+No ROMs, BIOS, firmware, keys or game packages are supplied.
 
-| Application | Role | winget ID |
-|---|---|---|
-| ES-DE | Frontend for browsing the library and launching games | `ES-DE.EmulationStation-DE` |
-| Dolphin | GameCube and Wii | `DolphinEmulator.Dolphin` |
-| PCSX2 | PlayStation 2 | `PCSX2Team.PCSX2` |
-| DuckStation | PlayStation 1 | `Stenzek.DuckStation` |
-| PPSSPP | PSP | `PPSSPPTeam.PPSSPP` |
-| RetroArch | NES, SNES, Genesis, GBA, Game Boy/Color, Atari and more via cores | `Libretro.RetroArch` |
-
-[apps.json](apps.json) is the list the scripts actually use, plus a `future`
-list of confirmed-available `winget` packages (shadPS4, RPCS3 excluded --
-see below --, Cemu, Azahar, Eden, Xenia, xemu, Vita3K, Ship of Harkinian,
-2 Ship 2 Harkinian) not yet wired into the default install.
-
-RPCS3 has **no** `winget` package by upstream policy (they discourage
-third-party redistribution of builds) -- get it from
-[rpcs3.net](https://rpcs3.net/) manually if you want PS3.
-
-No ROMs, BIOS, firmware or keys are supplied by this project or by these
-installers.
-
-## 1. Check the environment
-
-`winget` ships with modern Windows 10/11 as part of "App Installer". Confirm
-it's present:
+## 1. Prerequisites
 
 ```powershell
 winget --version
 ```
 
-If missing, install "App Installer" from the Microsoft Store first.
+If `winget` is missing, install "App Installer" from the Microsoft Store.
+Windows 10 also needs a recent build for `tar.exe` (built in since 1803),
+which extracts the `.7z`/`.rar` GitHub releases.
 
-## 2. Install the applications
+If scripts are blocked, allow them for this window only:
 
-From the repository root:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+## 2. Optional overrides
+
+Defaults need no configuration: ES-DE at `%USERPROFILE%\ES-DE`, ROMs at
+`%USERPROFILE%\ES-DE\ROMs\<system>`, emulators at `%USERPROFILE%\Emulators`,
+BIOS at `%USERPROFILE%\ES-DE\BIOS`, all on `C:`. To change any of them:
 
 ```powershell
 cd windows
-./install-apps.ps1
+if (-not (Test-Path config/localhost.psd1)) {
+    Copy-Item config/localhost.example.psd1 config/localhost.psd1
+}
+notepad config/localhost.psd1
 ```
 
-This reads [apps.json](apps.json) and runs `winget install` for each entry,
-skipping anything already installed. It never removes packages that aren't
-on the list.
-
-Run it from a normal interactive PowerShell window: the ES-DE, PCSX2, PPSSPP
-and RetroArch installers show a UAC prompt you have to approve. If Dolphin
-fails with `403 Forbidden`, its winget mirror is refusing downloads -- get it
-from [dolphin-emu.org](https://dolphin-emu.org/download/) instead (see
-[Known issues](README.md#known-issues)). Rerunning the script skips whatever
-already installed.
-
-### Inspecting the list
+Use `%USERPROFILE%`-style placeholders, not `$env:USERPROFILE` -- PowerShell
+data files can't evaluate `$env:`. Per-system ROM folders go in `RomPaths`:
 
 ```powershell
-./install-apps.ps1 -List     # print id / name / winget id, installs nothing
-./install-apps.ps1 -Check    # report installed vs. missing, installs nothing
-```
-
-To add an application, add an entry to the `apps` array in `apps.json` (or
-promote one from `future`) with its `wingetId`, `exeNames` and, if it needs
-one, `esdeEmulatorDir` -- see [README.md](README.md#architecture-and-next-steps).
-
-## 3. Configure your library paths
-
-Create the local override only if it does not exist yet:
-
-```powershell
-if (-not (Test-Path windows/config/localhost.psd1)) {
-    Copy-Item windows/config/localhost.example.psd1 windows/config/localhost.psd1
+RomPaths = @{
+    ps2 = 'C:\Games\PS2'
 }
 ```
 
-Everything in this baseline defaults to the `C:` drive -- `%USERPROFILE%`,
-`%LOCALAPPDATA%` and the standard installer locations (`C:\Program Files`,
-`C:\RetroArch-Win64`, ...) are all on `C:` on a normal single-drive Windows
-install. Only add a `D:`/other-drive path here if you deliberately keep ROMs
-or an emulator install somewhere else:
+## 3. Install the emulators
 
 ```powershell
-@{
-    EsdeHome = '%USERPROFILE%\ES-DE'
-    RomRoot  = '%USERPROFILE%\ES-DE\ROMs'
-    RomPaths = @{
-        # ps2 = '\\NAS\Games\roms\ps2'
-    }
-    CreateRomDirs = $false
-    BiosRoot = '%USERPROFILE%\ES-DE\BIOS'
-}
+./install-apps.ps1 -List     # what will be installed, and from where
+./install-apps.ps1           # install everything
+./install-apps.ps1 -Check    # what is installed, and where
 ```
 
-Use `%USERPROFILE%`-style placeholders, not `$env:USERPROFILE`: PowerShell
-data files can't evaluate `$env:` expressions, and the scripts expand the
-`%...%` form when they load the file.
+Approve the UAC prompts for ES-DE, RetroArch, PCSX2, PPSSPP and Azahar.
+Everything else installs without Administrator rights. Rerunning skips what is
+already installed; `-Only rpcs3,flycast` limits the run; `-Update` refreshes
+the GitHub-release emulators (RPCS3, Flycast, Supermodel, OpenBOR).
 
-The default `RomRoot` is `%USERPROFILE%\ES-DE\ROMs` (on `C:`), matching what
-ES-DE's own first-run wizard suggests. Missing directories are only reported,
-never created -- a disconnected network or USB drive must not silently become
-an empty local folder. Set `CreateRomDirs = $true` explicitly to opt in to
-creating missing local directories.
+Two emulators can't be downloaded by script:
 
-## 4. Review and apply
+- **Dolphin** (GameCube/Wii): download the current release from
+  [dolphin-emu.org](https://dolphin-emu.org/download/) in a browser and
+  extract it so the exe is at `%USERPROFILE%\Emulators\Dolphin-x64\Dolphin.exe`.
+- **Model 2 Emulator** (Sega Model 2): place ElSemi's Model 2 Emulator so the
+  exe is at `%USERPROFILE%\Emulators\m2emulator\EMULATOR.EXE`, then set
+  `[RomDirs] Dir1=` in its `EMULATOR.INI` to your model2 ROM folder. Until
+  then, pick MAME for model2 in ES-DE.
+
+## 4. Install the RetroArch cores
+
+```powershell
+./install-cores.ps1 -Check
+./install-cores.ps1
+```
+
+Downloads the cores for NES, SNES, Game Boy, GBA, N64, Sega 8/16/32-bit,
+Saturn, arcade, Atari and the extra systems from the libretro buildbot into
+RetroArch's `cores` folder. Existing cores are left alone unless `-Update`.
+
+## 5. Connect everything to ES-DE
 
 ```powershell
 ./bootstrap.ps1 -Action Check
 ./bootstrap.ps1 -Action Configure
 ```
 
-`-Action Check` previews without writing; `-Action Configure` writes. What it
-writes: a directory junction under `<EsdeHome>\Emulators\<name>\` for any
-installed emulator ES-DE's own find-rules can't already see on PATH or in the
-registry, and (only if `CreateRomDirs` is `$true`) missing ROM directories.
-No PATH variable is modified and no registry keys are written -- delete a
-junction under `Emulators\` to undo it.
+Writes `es_systems.xml` and `es_find_rules.xml` into
+`%USERPROFILE%\ES-DE\custom_systems\`. Rerun it whenever you install or move
+an emulator. To create the empty per-system ROM folders:
 
-## 5. First launch
+```powershell
+./bootstrap.ps1 -Action Configure -CreateRomDirs $true
+```
 
-1. Open Dolphin, PCSX2, DuckStation and PPSSPP once each and finish their
-   first-run setup.
-2. In PCSX2 and DuckStation, select your own PS1/PS2 BIOS.
-3. Open RetroArch, then use **Online Updater > Core Downloader** to fetch
-   cores for the systems you want. `winget` only installs the RetroArch
-   application, not cores.
-4. Configure your controller in each emulator.
-5. Open ES-DE. On first run it asks for a ROM directory -- point it at the
-   same path as `RomRoot` in `config/localhost.psd1`.
-6. Add your games at the configured per-system paths (e.g. `ROMs\gc`,
-   `ROMs\ps2`, ...) and launch one game per system. Check video, audio,
-   controller input, clean exit, and saving/loading.
+Close ES-DE before running it, then start ES-DE again.
 
-## 6. Apply emulator tuning
+## 6. First launch
 
-After each emulator has been opened once (so it has written its own config
-file):
+1. Open ES-DE. If its first-run wizard asks for a ROM directory, choose the
+   same root as `RomRoot` (default `%USERPROFILE%\ES-DE\ROMs`).
+2. Open each emulator you'll use once so it writes its own config, and do
+   its first-run setup:
+   - PCSX2, DuckStation: select your PS2/PS1 BIOS.
+   - RPCS3: install the PS3 firmware (`PS3UPDAT.PUP`).
+   - Eden: add your `prod.keys` and firmware.
+   - xemu: select your Xbox BIOS, flash and HDD image.
+   - Flycast: place `naomi.zip`, `naomi2.zip`, `awbios.zip` in its data
+     folder for NAOMI games.
+   - Cemu: point it at your Wii U keys if your dumps need them.
+3. Configure your controller in each emulator.
+
+## 7. Apply emulator tuning
 
 ```powershell
 ./configure-emulators.ps1 -Action Check
 ./configure-emulators.ps1 -Action Configure
 ```
 
-This applies the same graphics, widescreen and controller defaults the Linux
-setup uses, minus the Linux-only ones -- see
-[Emulator tuning](README.md#emulator-tuning) for the full list and what was
-deliberately left out. Emulators that aren't installed or haven't been opened
-yet are skipped. Changed files are backed up as `<file>.bak.<timestamp>`;
-copy one back over the original to undo.
+Applies the same graphics, widescreen and controller defaults as the Linux
+setup, minus the Linux-only ones (see
+[Emulator tuning](README.md#emulator-tuning)). Emulators that aren't installed
+or haven't been opened yet are skipped. Changed files are backed up as
+`<file>.bak.<timestamp>`; copy one back to undo.
 
-**BIOS:** if you create `BiosRoot` (default `%USERPROFILE%\ES-DE\BIOS`) and
-put your PS1 BIOS there, DuckStation is pointed at it. If the folder doesn't
-exist, DuckStation keeps its own `%LOCALAPPDATA%\DuckStation\bios` folder.
-PCSX2 asks for its BIOS folder in its first-run wizard.
+If you keep BIOS files in `BiosRoot` (default `%USERPROFILE%\ES-DE\BIOS`),
+DuckStation is pointed at it; otherwise DuckStation keeps its own BIOS folder.
 
-The automated test in `tests/verify.ps1` is no substitute for testing with
-real games.
+## 8. Play
+
+Put your games in the per-system folders -- same layouts as Linux:
+
+- PS3: extracted game folders named `<Title>.ps3`
+- PS4: `ps4\CUSAxxxxx\eboot.bin`
+- PS Vita: install the game in Vita3K first, then create `<Game name>.psvita`
+  containing its title ID (e.g. `PCSF00007`), per ES-DE's guide
+- OpenBOR: one folder per game with its own `OpenBOR.exe` (copy the engine
+  from `%USERPROFILE%\Emulators\OpenBOR`), or a `.lnk` shortcut to it
+
+Launch one game per system from ES-DE and check video, audio, controller
+input, clean exit, and saving/loading. The automated tests are no substitute
+for that.
 
 ## Verification
 
 ```powershell
-pwsh windows/tests/verify.ps1
+powershell -ExecutionPolicy Bypass -File windows/tests/verify.ps1
 ```
 
-Runs `bootstrap.ps1` and `configure-emulators.ps1` for real against temporary
-directories and fixture config files, never against your actual ES-DE or
-emulator configs. It never calls `winget` and installs nothing. See
-[README.md](README.md#verification) for what it checks.
-
-See [README.md](README.md) for architecture, scope boundaries, and how to add
-more emulators from the `future` list.
+Runs the scripts against temporary directories only, never your real setup,
+and downloads nothing. See [README.md](README.md#verification).

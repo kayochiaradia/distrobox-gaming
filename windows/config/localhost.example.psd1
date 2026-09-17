@@ -34,6 +34,12 @@
     # any of the installers -- see the "BIOS" note in windows/INSTALL.md.
     BiosRoot = '%USERPROFILE%\ES-DE\BIOS'
 
+    # Where portable and GitHub-downloaded emulators are installed, one
+    # folder per emulator. Defaults to your user profile on C: so no
+    # Administrator rights are needed. Manual downloads (Dolphin, Model 2
+    # Emulator) go here too.
+    EmulatorsRoot = '%USERPROFILE%\Emulators'
+
     # Per-emulator config file location overrides, read by
     # configure-emulators.ps1. Only set the ones that differ from the
     # defaults in config/emulators.psd1 (e.g. you installed PCSX2 or
