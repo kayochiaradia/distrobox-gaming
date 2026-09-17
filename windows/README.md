@@ -171,6 +171,12 @@ for (or documents where to put) your own copy, as noted below.
 | DOSBox Staging | `dosbox` | GitHub `dosbox-staging/dosbox-staging` | For the Screamer DOS games (Linux install_screamer); point it at your own game copies. |
 | Cheat Engine | `cheatengine` | **manual** | Linux install_cheatengine; the official installer bundles offers, so install it by hand. |
 
+Ship of Harkinian, 2 Ship 2 Harkinian and SpaghettiKart also get the same
+pinned GhostlyDark "Reloaded" HD packs as on Linux (OoT v11.0.0, MM v11.0.3,
+MK64 v2026.04.03; ~7 GB together) in their `mods` folder, SHA-256-verified. The
+Starship LR2EB pack is hand-staged from GameBanana on Linux too and stays
+manual.
+
 Not automated on Windows: **GoldenEye 64 Recompiled** (upstream only publishes
 a macOS build; the Linux role compiles it), **Render96ex** (no releases; the
 Linux role compiles it with its model/texture packs), **Project Reignition**

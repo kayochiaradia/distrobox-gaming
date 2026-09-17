@@ -205,6 +205,9 @@ function Resolve-AppRealExePath {
         $hit = Find-ExeUnder -Root (Join-Path $EmulatorsRoot $App.installDir) -ExeNames $App.exeNames
         if ($hit) { return $hit }
     }
+    # ownInstallOnly: never adopt a copy found elsewhere (e.g. a system Python
+    # on PATH, which pip would then modify).
+    if ($App.ownInstallOnly) { return $null }
 
     if ($App.wingetId) {
         $pkgRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'

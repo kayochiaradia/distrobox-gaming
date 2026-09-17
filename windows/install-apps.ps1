@@ -253,6 +253,41 @@ function Install-PipPackages {
     if ($LASTEXITCODE -ne 0) { throw "pip install $($missing -join ' ') failed (exit $LASTEXITCODE)" }
 }
 
+# Pinned add-ons installed next to an app's exe (e.g. HD .o2r packs into a
+# port's mods folder), same URL + SHA-256 pinning as the Linux roles. A
+# <dest>.dg-ref file records the installed hash, so reruns skip them.
+function Install-AppExtras {
+    param($App, [string]$ExePath)
+    foreach ($x in $App.extras) {
+        $dest = Join-Path (Split-Path -Parent $ExePath) $x.dest
+        $ref = "$dest.dg-ref"
+        if ([IO.File]::Exists($dest) -and [IO.File]::Exists($ref) -and [IO.File]::ReadAllText($ref).Trim() -eq $x.sha256) { continue }
+
+        $name = [IO.Path]::GetFileName(([Uri]$x.url).AbsolutePath)
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ("dg-extra-" + [Guid]::NewGuid().ToString('N') + '-' + $name)
+        $stage = "$tmp.d"
+        try {
+            Write-Host "    extra: downloading $name"
+            Invoke-WebRequest -Uri $x.url -OutFile $tmp -UseBasicParsing -Headers $userAgent
+            $hash = (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne $x.sha256) { throw "$name SHA-256 mismatch (got $hash)" }
+            $source = $tmp
+            if ($x.member) {
+                Expand-DgArchive -Path $tmp -Destination $stage
+                $source = (Get-ChildItem -LiteralPath $stage -Recurse -File -Filter $x.member | Select-Object -First 1).FullName
+                if (-not $source) { throw "$($x.member) not found inside $name" }
+            }
+            [void][IO.Directory]::CreateDirectory((Split-Path -Parent $dest))
+            [IO.File]::Copy($source, $dest, $true)
+            [IO.File]::WriteAllText($ref, $x.sha256)
+            Write-Host "    extra: $($x.dest)" -ForegroundColor Green
+        }
+        finally {
+            Remove-Item -LiteralPath $tmp, $stage -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Write-Host "Emulators root: $emulatorsRoot" -ForegroundColor Cyan
 
 $failures = @()
@@ -262,10 +297,11 @@ foreach ($app in $apps) {
     $refresh = $Update -and $app.source -in 'github', 'gitlab', 'url'
     if ($existing -and -not $refresh) {
         Write-Host "[skip] $($app.name): $existing" -ForegroundColor DarkGray
-        if ($app.pipPackages) {
-            try { Install-PipPackages -App $app -PythonExe $existing }
-            catch { Write-Host "[FAILED] $($app.name): $($_.Exception.Message)" -ForegroundColor Red; $failures += $app.name }
+        try {
+            if ($app.pipPackages) { Install-PipPackages -App $app -PythonExe $existing }
+            if ($app.extras) { Install-AppExtras -App $app -ExePath $existing }
         }
+        catch { Write-Host "[FAILED] $($app.name): $($_.Exception.Message)" -ForegroundColor Red; $failures += $app.name }
         continue
     }
 
@@ -285,6 +321,7 @@ foreach ($app in $apps) {
         $installed = Resolve-AppRealExePath -App $app -EmulatorsRoot $emulatorsRoot
         if (-not $installed) { throw "installer finished but none of $($app.exeNames -join ', ') was found" }
         if ($app.pipPackages) { Install-PipPackages -App $app -PythonExe $installed }
+        if ($app.extras) { Install-AppExtras -App $app -ExePath $installed }
         Write-Host "    ok: $installed" -ForegroundColor Green
     }
     catch {

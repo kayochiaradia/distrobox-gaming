@@ -37,6 +37,7 @@ function New-TempDir {
 
 $apps = @(Get-DgApps -ScriptRoot $windowsRoot)
 Assert ((@($apps.id | Sort-Object -Unique)).Count -eq $apps.Count) 'apps.json ids are unique'
+Assert ([bool]($apps | Where-Object id -eq 'python').ownInstallOnly) 'the project Python never adopts a system Python (pip would modify it)'
 foreach ($app in $apps) {
     $ok = $app.id -and $app.name -and $app.exeNames -and ($app.source -in 'winget', 'github', 'gitlab', 'url', 'manual')
     if ($app.source -eq 'winget') { $ok = $ok -and $app.wingetId }
@@ -44,6 +45,10 @@ foreach ($app in $apps) {
     if ($app.source -eq 'gitlab') { $ok = $ok -and $app.project -and $app.assetPattern -and $app.installDir }
     if ($app.source -eq 'url') { $ok = $ok -and $app.installDir -and (($app.url -and $app.version) -or ($app.versionIndexUrl -and $app.versionRegex -and $app.urlTemplate)) }
     if ($app.group) { $ok = $ok -and ($app.group -in 'ports', 'pctools') }
+    foreach ($x in @($app.extras)) {
+        if ($null -eq $x) { continue }
+        $ok = $ok -and $x.url -like 'https://*' -and $x.sha256 -match '^[0-9a-f]{64}$' -and $x.dest -and -not [IO.Path]::IsPathRooted($x.dest)
+    }
     Assert (-not $app.uac) "apps.json entry '$($app.id)' installs without Administrator rights"
     if ($app.source -eq 'manual') { $ok = $ok -and $app.installDir }
     Assert ([bool]$ok) "apps.json entry '$($app.id)' has the fields its source needs"
