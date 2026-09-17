@@ -72,7 +72,7 @@ nothing, and is safe to rerun.
 | Script | Linux counterpart | What it does |
 |---|---|---|
 | `install-apps.ps1` | `bootstrap_packages`, `install_*` roles | Installs [apps.json](apps.json). winget portable packages and GitHub releases go to `%USERPROFILE%\Emulators\<name>` (no admin needed); installer-based packages go where their installer puts them. Skips anything already installed; `-Update` refreshes GitHub releases; `-Only` limits to some apps |
-| `install-cores.ps1` | `retroarch_extras` | Downloads every core referenced in `esde-systems.psd1` plus the extras, into RetroArch's `cores` folder. Never overwrites an existing core unless `-Update` |
+| `install-cores.ps1` | `retroarch_extras` | Downloads every core referenced in `esde-systems.psd1` plus the extras into RetroArch's `cores` folder, and the same 8 asset packs as Linux (info, assets, autoconfig, cheats, databases, slang shaders, overlays; ~245 MB, skip with `-NoAssets`). Never overwrites unless `-Update` |
 | `bootstrap.ps1` | `configure_esde` | Writes `%USERPROFILE%\ES-DE\custom_systems\es_systems.xml` (the 43 systems, their ROM folders and emulator order) and `es_find_rules.xml` (the real path of each installed emulator). Reports or creates ROM folders |
 | `configure-emulators.ps1` | `link_storage`, `seed_configs`, `gpu.yml` | BIOS placement and emulator tuning, below |
 | `install-shortcuts.ps1` | `desktop_apps`, `install-host-launchers.sh` | Start Menu folder `distrobox-gaming` with a shortcut per installed emulator and ES-DE; removes shortcuts for apps no longer installed |

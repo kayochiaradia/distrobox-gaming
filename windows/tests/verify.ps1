@@ -143,10 +143,14 @@ finally {
 
 $cd = New-TempDir
 try {
-    Set-Content -Path (Join-Path $cd 'mesen_libretro.dll') -Value 'fake'
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsRoot 'install-cores.ps1') -Check -CoresDir $cd 2>&1 | Out-String
-    Assert ($LASTEXITCODE -eq 0 -and $out -match 'Missing:' -and $out -notmatch 'Missing:.*\bmesen\b') 'install-cores -Check reports missing cores and counts present ones'
-    Assert (@(Get-ChildItem $cd).Count -eq 1) 'install-cores -Check writes nothing'
+    New-Item -ItemType Directory -Path (Join-Path $cd 'cores'), (Join-Path $cd 'overlays') -Force | Out-Null
+    Set-Content -Path (Join-Path $cd 'cores\mesen_libretro.dll') -Value 'fake'
+    Set-Content -Path (Join-Path $cd 'overlays\.dg-installed') -Value 'fake'
+    $before = @(Get-ChildItem $cd -Recurse -Force).Count
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsRoot 'install-cores.ps1') -Check -RetroArchDir $cd 2>&1 | Out-String
+    Assert ($LASTEXITCODE -eq 0 -and $out -match 'Missing cores:' -and $out -notmatch 'Missing cores:.*\bmesen\b') 'install-cores -Check reports missing cores and counts present ones'
+    Assert ($out -match 'Missing asset packs:' -and $out -notmatch 'Missing asset packs:.*overlays\.zip') 'install-cores -Check honours asset pack stamps'
+    Assert (@(Get-ChildItem $cd -Recurse -Force).Count -eq $before) 'install-cores -Check writes nothing'
 }
 finally {
     Remove-Item -Path $cd -Recurse -Force -ErrorAction SilentlyContinue
