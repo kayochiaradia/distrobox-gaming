@@ -179,6 +179,7 @@ try {
     & $bootstrap -Action Configure -ConfigPath $cfg -CreateRomDirs $true | Out-Null
     Assert ((Test-Path (Join-Path $romRoot 'snes')) -and [IO.Directory]::Exists($oddPs2)) 'CreateRomDirs creates default and overridden ROM folders, including names with [brackets]'
 }
+catch { Assert $false "test section crashed: $($_.Exception.Message)" }
 finally {
     Remove-Item -Path $sb -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -198,6 +199,7 @@ try {
     Assert ($out -match 'Missing asset packs:' -and $out -notmatch 'Missing asset packs:.*overlays\.zip') 'install-cores -Check honours asset pack stamps'
     Assert (@(Get-ChildItem $cd -Recurse -Force).Count -eq $before) 'install-cores -Check writes nothing'
 }
+catch { Assert $false "test section crashed: $($_.Exception.Message)" }
 finally {
     Remove-Item -Path $cd -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -254,8 +256,114 @@ try {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsRoot 'verify-setup.ps1') -ConfigPath $bkCfg -ShortcutsDir (Join-Path $bk 'none') *> $null
     Assert ($LASTEXITCODE -eq 1) 'verify-setup exits 1 when apps and ES-DE files are missing'
 }
+catch { Assert $false "test section crashed: $($_.Exception.Message)" }
 finally {
     Remove-Item -Path $bk -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
+# content.ps1 (runs the real Linux Python helpers on fixture files)
+# ---------------------------------------------------------------------------
+
+$py = Resolve-AppRealExePath -App ($apps | Where-Object id -eq 'python') -EmulatorsRoot "$env:USERPROFILE\Emulators"
+if (-not $py) {
+    Write-Host '[skip] content.ps1 tests need portable Python (./install-apps.ps1 -Only python)' -ForegroundColor Yellow
+} else {
+    $ct = New-TempDir
+    try {
+        $ctEmu = Join-Path $ct 'Emulators'; $ctRoms = Join-Path $ct 'ROMs'
+        foreach ($exe in 'eden\eden.exe', 'pcsx2\pcsx2-qt.exe', 'RPCS3\rpcs3.exe') {
+            New-Item -ItemType Directory -Path (Split-Path (Join-Path $ctEmu $exe)) -Force | Out-Null
+            Set-Content -Path (Join-Path $ctEmu $exe) -Value 'fake'
+        }
+        New-Item -ItemType Directory -Path (Split-Path (Join-Path $ctEmu 'python\python.exe')) -Force | Out-Null
+        Copy-Item -Path (Join-Path (Split-Path $py) '*') -Destination (Join-Path $ctEmu 'python') -Recurse -Force
+
+        # IPS: patch 3 bytes at offset 2 of an 8-byte ROM.
+        $base = Join-Path $ctRoms 'gba\Test (USA).gba'
+        New-Item -ItemType Directory -Path (Split-Path $base) -Force | Out-Null
+        [IO.File]::WriteAllBytes($base, [byte[]](0, 1, 2, 3, 4, 5, 6, 7))
+        $ips = Join-Path $ct 'test.ips'
+        [IO.File]::WriteAllBytes($ips, [byte[]](@([Text.Encoding]::ASCII.GetBytes('PATCH')) + @(0, 0, 2, 0, 3, 0xAA, 0xBB, 0xCC) + @([Text.Encoding]::ASCII.GetBytes('EOF'))))
+        $sha1 = { param($b) ([BitConverter]::ToString((New-Object Security.Cryptography.SHA1Managed).ComputeHash([byte[]]$b)) -replace '-', '').ToLower() }
+        $baseSha1 = & $sha1 ([byte[]](0, 1, 2, 3, 4, 5, 6, 7))
+        $outSha1 = & $sha1 ([byte[]](0, 1, 0xAA, 0xBB, 0xCC, 5, 6, 7))
+        $patched = Join-Path $ctRoms 'gba\Test (Patched).gba'
+
+        $cheatSrc = Join-Path $ct 'cheats\0100ABCDEF123456 - Test Game\cheats'
+        New-Item -ItemType Directory -Path $cheatSrc -Force | Out-Null
+        Set-Content -Path (Join-Path $cheatSrc 'BUILD.txt') -Value '[inf money]'
+        New-Item -ItemType Directory -Path (Join-Path $ct 'ps3-DLC'), (Join-Path $ct 'PCSX2\patches') -Force | Out-Null
+        Set-Content -Path (Join-Path $ct 'PCSX2\patches\SLUS-00001_AAAAAAAA.pnach') -Value 'gametitle=Test'
+        Set-Content -Path (Join-Path $ct 'append.pnach') -Value '[Cheats/Max Cash]'
+
+        $ctCfg = Join-Path $ct 'localhost.psd1'
+        Set-Content -Path $ctCfg -Encoding UTF8 -Value "@{ EmulatorsRoot = '$ctEmu'; RomRoot = '$ctRoms' }"
+        $ctContent = Join-Path $ct 'content.psd1'
+        Set-Content -Path $ctContent -Encoding UTF8 -Value @"
+@{
+    Ps3DlcSource = '$(Join-Path $ct 'ps3-DLC')'
+    Rpcs3GameDir = '{dir:rpcs3}\dev_hdd0\game'
+    SwitchCheatsSource = '$(Join-Path $ct 'cheats')'
+    EdenLoadDir = '$(Join-Path $ct 'eden-load')'
+    Pcsx2Dir = '$(Join-Path $ct 'PCSX2')'
+    Pcsx2PacksRoot = '$(Join-Path $ct 'packs')'
+    Pcsx2CheatsSource = '{{Pcsx2PacksRoot}}\cheats'
+    Scripts = @{
+        ExtractPs3Dlc = '{reporoot}\ansible\roles\scripts_in_box\files\extract_ps3_dlc.py'
+        ApplyIps = '{reporoot}\ansible\roles\install_rom_patches\files\apply_ips.py'
+        ApplyBps = '{reporoot}\ansible\roles\install_rom_patches\files\apply_bps.py'
+        RomPatchFiles = '$ct'
+        Pcsx2LocalPnach = '$ct'
+    }
+    Pcsx2TexturePacks = @()
+    Pcsx2PatchUrls = @()
+    Pcsx2PatchUrlRenames = @()
+    Pcsx2PatchAppends = @( @{ Target = 'SLUS-00001_AAAAAAAA.pnach'; LocalFile = 'append.pnach' } )
+    Pcsx2PerGameSettings = @( @{ Serial = 'SLUS-00001'; Crc = 'AAAAAAAA'; Name = 'Test'; Settings = @( @{ Section = 'EmuCore/GS'; Option = 'AspectRatio'; Value = '16:9' } ) } )
+    RomPatches = @( @{ Name = 'Test patch'; Base = '{{RomPath:gba}}\Test (USA).gba'; BaseSha1 = '$baseSha1'; Patch = 'test.ips'; Out = '{{RomPath:gba}}\Test (Patched).gba'; OutSha1 = '$outSha1' } )
+}
+"@
+        $contentScript = Join-Path $windowsRoot 'content.ps1'
+        $run = { param([string[]]$Extra) $ErrorActionPreference = 'Continue'; & powershell -NoProfile -ExecutionPolicy Bypass -File $contentScript -ConfigPath $ctCfg -ContentConfigPath $ctContent @Extra 2>&1 | Out-String }
+
+        $out = & $run @('-Tags', 'dlcs,cheats,pcsx2,rom_patches')
+        Assert ($LASTEXITCODE -eq 0 -and -not (Test-Path $patched) -and -not (Test-Path (Join-Path $ct 'eden-load'))) 'content.ps1 Check writes nothing'
+        Assert ($out -match 'no \.pkg files') 'content.ps1 dlcs skips the extractor when there are no PKGs (like the Linux role)'
+        $dry = & {
+            $ErrorActionPreference = 'Continue'
+            & (Join-Path $ctEmu 'python\python.exe') (Join-Path $repoRoot 'ansible\roles\scripts_in_box\files\extract_ps3_dlc.py') (Join-Path $ct 'ps3-DLC') --dry-run 2>&1 | Out-String
+        }
+        Assert ($dry -match 'No PKG files found') 'the Linux PS3 extractor imports and runs on portable Python (cryptography available)'
+
+        $out = & $run @('-Tags', 'cheats,pcsx2,rom_patches', '-Action', 'Configure')
+        Assert ($LASTEXITCODE -eq 0) "content.ps1 Configure succeeds$(if ($LASTEXITCODE) { " -- $out" })"
+        Assert ((Test-Path $patched) -and ((Get-FileHash $patched -Algorithm SHA1).Hash.ToLower() -eq $outSha1)) 'ROM patch applied through the Linux apply_ips.py with a verified SHA-1'
+        $link = Get-Item (Join-Path $ct 'eden-load\0100ABCDEF123456\cheats')
+        Assert ($link.LinkType -eq 'Junction' -and (Test-Path (Join-Path $link.FullName 'BUILD.txt'))) 'Switch cheats are junctioned into the Eden load dir by title ID'
+        Assert ((Get-Content (Join-Path $ct 'PCSX2\gamesettings\SLUS-00001_AAAAAAAA.ini')) -contains 'AspectRatio = 16:9') 'PCSX2 per-game settings go to <SERIAL>_<CRC>.ini'
+        Assert ((Get-Content -Raw (Join-Path $ct 'PCSX2\patches\SLUS-00001_AAAAAAAA.pnach')) -match 'Max Cash') 'local pnach block is appended'
+
+        $pnachHash = (Get-FileHash (Join-Path $ct 'PCSX2\patches\SLUS-00001_AAAAAAAA.pnach')).Hash
+        $out = & $run @('-Tags', 'cheats,pcsx2,rom_patches', '-Action', 'Configure')
+        Assert ($out -match 'already patched' -and (Get-FileHash (Join-Path $ct 'PCSX2\patches\SLUS-00001_AAAAAAAA.pnach')).Hash -eq $pnachHash) 'content.ps1 re-run is idempotent'
+
+        [IO.File]::WriteAllBytes($base, [byte[]](9, 9, 9))
+        Remove-Item $patched
+        $out = & $run @('-Tags', 'rom_patches', '-Action', 'Configure')
+        Assert ($LASTEXITCODE -eq 1 -and $out -match 'wrong revision' -and -not (Test-Path $patched)) 'a base ROM with the wrong SHA-1 is refused'
+
+        [IO.File]::WriteAllBytes($base, [byte[]](0, 1, 2, 3, 4, 5, 6, 7))
+        & $run @('-Tags', 'rom_patches', '-Action', 'Configure') | Out-Null
+        & $run @('-Tags', 'rom_patches', '-Action', 'Configure', '-Revert') | Out-Null
+        Assert ((-not (Test-Path $patched)) -and (Test-Path $base)) '-Revert removes only the patched copy'
+    }
+    catch { Assert $false "test section crashed: $($_.Exception.Message)" }
+    finally {
+        Get-ChildItem -Path $ct -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.LinkType -eq 'Junction' } | ForEach-Object { [IO.Directory]::Delete($_.FullName) }
+        Remove-Item -Path $ct -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -286,6 +394,7 @@ try {
     & $shortcuts -Action Configure -ConfigPath $scCfg -ShortcutsDir $scDir | Out-Null
     Assert ((Get-FileHash $lnkPath).Hash -eq $h) 're-running install-shortcuts leaves shortcuts unchanged'
 }
+catch { Assert $false "test section crashed: $($_.Exception.Message)" }
 finally {
     Remove-Item -Path $sc -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -407,6 +516,7 @@ try {
     Assert ((Get-Content $naomi) -eq 'naomi-v2') 'sync-mode BIOS files are recopied when the source changes'
     Assert ((Get-Content $bios7) -eq 'bios7-v1') 'seed-mode BIOS files are never overwritten'
 }
+catch { Assert $false "test section crashed: $($_.Exception.Message)" }
 finally {
     Remove-Item -Path $fx -Recurse -Force -ErrorAction SilentlyContinue
 }

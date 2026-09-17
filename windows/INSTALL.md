@@ -159,6 +159,18 @@ Launch one game per system from ES-DE and check video, audio, controller
 input, clean exit, and saving/loading. The automated tests are no substitute
 for that.
 
+## 9. Optional content
+
+DLCs and updates, Switch cheats, per-game RPCS3/PCSX2 tuning, romhack patches
+and HD texture packs, the same opt-in extras as the Linux setup. Put your files
+in the source folders listed in [Optional content](README.md#optional-content)
+and run the tags you want:
+
+```powershell
+./content.ps1 -Tags dlcs,cheats,rpcs3_configs,pcsx2,rom_patches,hd_textures
+./content.ps1 -Tags pcsx2,rom_patches -Action Configure
+```
+
 ## Shortcut: everything at once
 
 Steps 3 to 7 in one command, and a final check:

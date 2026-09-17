@@ -147,8 +147,18 @@ function Get-ReleaseArchive {
             $index = (Invoke-WebRequest -Uri $App.versionIndexUrl -UseBasicParsing -Headers $userAgent).Content
             $versions = @([regex]::Matches($index, $App.versionRegex) | ForEach-Object { [version]$_.Groups[1].Value } | Sort-Object -Descending)
             if (-not $versions) { throw "no version matching '$($App.versionRegex)' at $($App.versionIndexUrl)" }
-            $url = $App.urlTemplate.Replace('{version}', $versions[0].ToString())
-            return @{ Version = $versions[0].ToString(); Url = $url; FileName = [IO.Path]::GetFileName(([Uri]$url).AbsolutePath) }
+            # probeUrl: index folders can exist before their files (pre-releases),
+            # so take the newest version whose download actually exists.
+            $candidates = if ($App.probeUrl) { @($versions | Select-Object -First 15) } else { @($versions[0]) }
+            foreach ($v in $candidates) {
+                $url = $App.urlTemplate.Replace('{version}', $v.ToString())
+                if ($App.probeUrl) {
+                    try { [void](Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -Headers $userAgent) }
+                    catch { continue }
+                }
+                return @{ Version = $v.ToString(); Url = $url; FileName = [IO.Path]::GetFileName(([Uri]$url).AbsolutePath) }
+            }
+            throw "none of the newest versions at $($App.versionIndexUrl) has $($App.urlTemplate)"
         }
     }
     throw "source '$($App.source)' has no release archive"
@@ -168,12 +178,53 @@ function Install-FromArchive {
     try {
         Write-Host "    downloading $($archive.FileName) ($($archive.Version))"
         Invoke-WebRequest -Uri $archive.Url -OutFile $tmp -UseBasicParsing -Headers $userAgent
-        Expand-DgArchive -Path $tmp -Destination $dest
+        if ($App.installerArgs) {
+            # Per-user installer run silently into the install dir (no UAC).
+            $argList = $App.installerArgs.Replace('{dest}', $dest)
+            $proc = Start-Process -FilePath $tmp -ArgumentList $argList -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "installer exited with code $($proc.ExitCode)" }
+        } else {
+            Expand-DgArchive -Path $tmp -Destination $dest
+        }
+        [void][IO.Directory]::CreateDirectory($dest)
         [IO.File]::WriteAllText($marker, $archive.Version)
     }
     finally {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     }
+}
+
+# The embeddable Python ships without pip and ignores site-packages until
+# "import site" is enabled in its pythonXY._pth. Idempotent: only acts when
+# a listed package can't be imported.
+function Install-PipPackages {
+    param($App, [string]$PythonExe)
+    $ErrorActionPreference = 'Continue'
+    $missing = @($App.pipPackages | Where-Object {
+        & $PythonExe -c "import $_" 2>$null | Out-Null
+        $LASTEXITCODE -ne 0
+    })
+    if (-not $missing) { return }
+
+    $pyDir = Split-Path -Parent $PythonExe
+    foreach ($pth in [IO.Directory]::GetFiles($pyDir, 'python*._pth')) {
+        $text = [IO.File]::ReadAllText($pth)
+        if ($text -match '(?m)^#\s*import site') {
+            [IO.File]::WriteAllText($pth, ($text -replace '(?m)^#\s*import site', 'import site'))
+        }
+    }
+    & $PythonExe -m pip --version 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $getPip = Join-Path ([IO.Path]::GetTempPath()) "dg-get-pip-$([Guid]::NewGuid().ToString('N')).py"
+        try {
+            Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $getPip -UseBasicParsing -Headers $userAgent
+            & $PythonExe $getPip --no-warn-script-location 2>&1 | Select-Object -Last 2 | ForEach-Object { Write-Host "    $_" }
+            if ($LASTEXITCODE -ne 0) { throw "get-pip.py failed (exit $LASTEXITCODE)" }
+        } finally { Remove-Item -LiteralPath $getPip -Force -ErrorAction SilentlyContinue }
+    }
+    Write-Host "    pip install $($missing -join ' ')"
+    & $PythonExe -m pip install --only-binary=:all: --no-warn-script-location @missing 2>&1 | Select-Object -Last 2 | ForEach-Object { Write-Host "    $_" }
+    if ($LASTEXITCODE -ne 0) { throw "pip install $($missing -join ' ') failed (exit $LASTEXITCODE)" }
 }
 
 Write-Host "Emulators root: $emulatorsRoot" -ForegroundColor Cyan
@@ -185,6 +236,10 @@ foreach ($app in $apps) {
     $refresh = $Update -and $app.source -in 'github', 'gitlab', 'url'
     if ($existing -and -not $refresh) {
         Write-Host "[skip] $($app.name): $existing" -ForegroundColor DarkGray
+        if ($app.pipPackages) {
+            try { Install-PipPackages -App $app -PythonExe $existing }
+            catch { Write-Host "[FAILED] $($app.name): $($_.Exception.Message)" -ForegroundColor Red; $failures += $app.name }
+        }
         continue
     }
 
@@ -203,6 +258,7 @@ foreach ($app in $apps) {
         else { throw "unknown source '$($app.source)'" }
         $installed = Resolve-AppRealExePath -App $app -EmulatorsRoot $emulatorsRoot
         if (-not $installed) { throw "installer finished but none of $($app.exeNames -join ', ') was found" }
+        if ($app.pipPackages) { Install-PipPackages -App $app -PythonExe $installed }
         Write-Host "    ok: $installed" -ForegroundColor Green
     }
     catch {

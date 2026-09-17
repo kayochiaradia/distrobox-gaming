@@ -92,12 +92,24 @@ function Get-DgApps {
     return (Get-Content -Raw -Path (Join-Path $ScriptRoot 'apps.json') | ConvertFrom-Json).apps
 }
 
+# -Tags/-Only values: "a,b" arrives as one string through powershell -File,
+# so split on commas and validate against the allowed set.
+function Resolve-DgTags {
+    param([string[]]$Values, [string[]]$Allowed)
+    $tags = @($Values | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $bad = @($tags | Where-Object { $_ -notin $Allowed })
+    if ($bad) { throw "Unknown tag(s): $($bad -join ', '). Valid: $($Allowed -join ', ')" }
+    return $tags
+}
+
 # Token expansion shared by the config-driven scripts. Returns $null when a
 # {dir:<app>} token names an app that isn't installed.
 #   {dir:<app id>}      folder of that app's installed exe
 #   {esdehome}          detected ES-DE home
 #   {scriptroot}        the windows/ folder
+#   {reporoot}          the repository root
 #   {{BiosRoot}}        BiosRoot
+#   {{RomRoot}}         RomRoot
 #   {{RomPath:<sys>}}   RomPaths override or RomRoot\<sys>
 $script:DgAppDirCache = @{}
 function Get-DgAppDir {
@@ -127,8 +139,8 @@ function Expand-DgTokens {
     foreach ($m in [regex]::Matches($out, '\{\{RomPath:([a-z0-9]+)\}\}')) {
         $out = $out.Replace($m.Value, (Get-DgRomPath -System $m.Groups[1].Value -Config $Config))
     }
-    $out = $out.Replace('{{BiosRoot}}', $Config.BiosRoot).Replace('{esdehome}', $Config.EsdeHome)
-    if ($ScriptRoot) { $out = $out.Replace('{scriptroot}', $ScriptRoot) }
+    $out = $out.Replace('{{BiosRoot}}', $Config.BiosRoot).Replace('{{RomRoot}}', $Config.RomRoot).Replace('{esdehome}', $Config.EsdeHome)
+    if ($ScriptRoot) { $out = $out.Replace('{scriptroot}', $ScriptRoot).Replace('{reporoot}', (Split-Path -Parent $ScriptRoot)) }
     return $out
 }
 
@@ -204,8 +216,10 @@ function Resolve-AppRealExePath {
         }
     }
 
+    # WinGet\Links holds alias shims; WindowsApps holds Microsoft Store App
+    # Execution Aliases (e.g. a python.exe stub that only opens the Store).
     $onPath = Get-PathExe -ExeNames $App.exeNames
-    if ($onPath -and $onPath -notlike '*\WinGet\Links\*') { return $onPath }
+    if ($onPath -and $onPath -notlike '*\WinGet\Links\*' -and $onPath -notlike '*\WindowsApps\*') { return $onPath }
 
     if ($App.registryAppPaths) {
         $viaAppPaths = Get-AppPathsRegistryExe -ExeNames $App.registryAppPaths

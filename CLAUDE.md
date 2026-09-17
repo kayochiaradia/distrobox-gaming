@@ -92,6 +92,13 @@ Wine. Plain PowerShell 5.1 scripts, each with a preview mode:
   `config/retroarch-cores.psd1` extras, and the 8 asset packs, from the
   libretro buildbot.
 - `install-shortcuts.ps1` — counterpart of `desktop_apps`: Start Menu shortcuts.
+- `content.ps1 -Tags ...` — the never-tagged content roles (install_dlcs,
+  switch_cheats, rpcs3_per_game_configs, pcsx2_textures, install_rom_patches,
+  install_hd_textures), data in `config/content.psd1`. It runs the Linux
+  roles' Python helpers unchanged on the portable Python app (pip enabled for
+  `cryptography`) — reuse them rather than porting to PowerShell. Directory
+  links are junctions (`lib/configfiles.ps1` Set-DgDirLink), file links hard
+  links; no symlinks (they need Developer Mode).
 - `site.ps1`, `reset-configs.ps1`, `backup.ps1`, `restore.ps1`, `verify-setup.ps1`
   — counterparts of `site.yml`, `reset-configs.yml`, `backup.yml`, `restore.yml`
   and the `verify` role. Backups are config-only zips driven by

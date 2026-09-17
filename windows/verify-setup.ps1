@@ -79,7 +79,7 @@ if ($installed.ContainsKey('retroarch')) {
 }
 
 Write-Host "`n== Start Menu ($ShortcutsDir) ==" -ForegroundColor Cyan
-$noShortcut = @($apps | Where-Object { $installed.ContainsKey($_.id) -and -not [IO.File]::Exists((Join-Path $ShortcutsDir "$($_.name).lnk")) })
+$noShortcut = @($apps | Where-Object { $_.shortcut -ne $false -and $installed.ContainsKey($_.id) -and -not [IO.File]::Exists((Join-Path $ShortcutsDir "$($_.name).lnk")) })
 if ($noShortcut) { Fail "no shortcut for: $($noShortcut.name -join ', ') -- run ./install-shortcuts.ps1 -Action Configure" }
 else { Pass 'every installed app has a shortcut' }
 

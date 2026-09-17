@@ -49,12 +49,13 @@ Write-Host "`n== Start Menu shortcuts ($ShortcutsDir) ==" -ForegroundColor Cyan
 
 $wanted = @{}
 foreach ($app in Get-DgApps -ScriptRoot $scriptRoot) {
+    if ($app.shortcut -eq $false) { continue }
     $exe = Resolve-AppRealExePath -App $app -EmulatorsRoot $config.EmulatorsRoot
     if (-not $exe) { continue }
 
     $lnk = Join-Path $ShortcutsDir "$($app.name).lnk"
     $wanted[$lnk] = $true
-    $description = if ($app.role -eq 'frontend') { 'Emulator frontend' } else {
+    $description = if ($app.role -eq 'frontend') { 'Emulator frontend' } elseif ($app.role -eq 'tool') { $app.name } else {
         $names = @($app.systems | ForEach-Object { if ($systemNames.ContainsKey($_)) { $systemNames[$_] } else { $_ } })
         if ($names.Count -gt 4) { "$($names[0..3] -join ', ') and $($names.Count - 4) more" } else { $names -join ', ' }
     }

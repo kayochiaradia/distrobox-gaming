@@ -70,6 +70,43 @@ Or all of it in one go, like `ansible-playbook site.yml`: `./site.ps1`
 Every script accepts a preview mode (`-Check` or `-Action Check`) that writes
 nothing, and is safe to rerun.
 
+### Optional content
+
+`content.ps1` is the Windows side of the Linux roles that only run when their
+tag is passed (`--tags dlcs`, `cheats`, ...). Nothing runs without `-Tags`;
+the default action previews, `-Action Configure` applies. Data lives in
+[config/content.psd1](config/content.psd1).
+
+| Tag | Linux role | What it does on Windows |
+|---|---|---|
+| `dlcs` | `install_dlcs` | PS3 `.pkg` DLC/patches from `ROMs\ps3-DLC` into RPCS3's `dev_hdd0\game`, Switch update/DLC `.nsp` from `ROMs\switch_updates` into Eden's NAND -- with the same `extract_ps3_dlc.py` / `install_switch_updates.py` |
+| `cheats` | `switch_cheats` | Atmosphere cheats from `ROMs\switch_cheats\<TitleID> - Name\cheats` junctioned into `%APPDATA%\eden\load\<TitleID>\cheats` |
+| `rpcs3_configs` | `rpcs3_per_game_configs` | Tuned `custom_configs` per PS3 game from the RPCS3 compatibility API (same `generate_rpcs3_configs.py`; `-Force` overwrites) |
+| `pcsx2` | `pcsx2_textures` | Texture packs junctioned into `textures\<serial>\replacements`, the public widescreen/camera `.pnach` patches (plus CRC renames and the GT4 Spec II cheat block), cheats from `ps2-packs\cheats`, and the per-game `gamesettings\<SERIAL>_<CRC>.ini` fixes (GT3/GT4/Spec II, Enthusia, Colin McRae 04/2005, Ridge Racer V) |
+| `rom_patches` | `install_rom_patches` | The six IPS/BPS romhacks (DKC GBA colour restoration, Final Fight ONE Arcade Edition, F-Zero Vintage Velocity I/Ace, Super Metroid Redux, Return to Yoshi's Island Demo 2) as separate SHA-1-verified copies beside your originals; `-Revert` removes the copies |
+| `hd_textures` | `install_hd_textures` | Dolphin 4K packs (Luigi's Mansion, Sunshine, Skyward Sword, Wind Waker) from `ROMs\HD-textures\dolphin-textures`: only `Load/Textures` is extracted, then junctioned into Dolphin |
+
+The Python helpers run unchanged on the official portable Python that
+`install-apps.ps1` installs (with `pip` enabled for `cryptography`, which the
+PS3 extractor needs). Links are junctions and hard links, so no Administrator
+rights or Developer Mode are needed; sources on a network share are copied,
+since junctions can't point at one. Existing non-empty folders are never
+replaced, and ROMs, BIOS and saves are never deleted.
+
+The helper scripts the Linux README documents for manual use work the same
+way, e.g.:
+
+```powershell
+& "$env:USERPROFILE\Emulators\python\python.exe" ..\ansible\roles\install_dlcs\files\check_ps3_updates.py "$env:USERPROFILE\ES-DE\ROMs\ps3" --dlc-dir "$env:USERPROFILE\ES-DE\ROMs\ps3-DLC" --list
+```
+
+**Eden Cheats Manager** (the Linux `install_eden_cheats_manager` tool) is
+installed by `install-apps.ps1` from its Windows build.
+
+Not ported: `install_smm2_levels` (needs its Rust injector built with a Rust
+toolchain) and `steam_trainers`/`install_cheatengine` (Proton prefix tooling;
+on Windows, trainers and Cheat Engine run natively).
+
 ### Maintenance
 
 | Script | Linux counterpart | What it does |

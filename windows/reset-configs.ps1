@@ -21,13 +21,14 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('configs', 'desktop', 'esde', 'verify')]
     [string[]]$Tags = @('configs', 'desktop', 'esde', 'verify'),
     [string]$ConfigPath
 )
 
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptRoot 'lib\common.ps1')
+$Tags = Resolve-DgTags -Values $Tags -Allowed @('configs', 'desktop', 'esde', 'verify')
 $common = @{}
 if ($ConfigPath) { $common.ConfigPath = $ConfigPath }
 

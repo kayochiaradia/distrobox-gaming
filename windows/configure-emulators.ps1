@@ -36,6 +36,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'lib\common.ps1')
+. (Join-Path $scriptRoot 'lib\configfiles.ps1')
 
 $apply = $Action -eq 'Configure'
 if (-not $EmulatorsConfigPath) { $EmulatorsConfigPath = Join-Path $scriptRoot 'config\emulators.psd1' }
@@ -52,116 +53,7 @@ $apps = @(Get-DgApps -ScriptRoot $scriptRoot)
 function Get-AppDir { param([string]$Id) Get-DgAppDir -Id $Id -Config $config -Apps $apps }
 function Expand-Tokens { param([string]$Text) Expand-DgTokens -Text $Text -Config $config -Apps $apps -ScriptRoot $scriptRoot }
 
-# ---------------------------------------------------------------------------
-# File helpers (mirror community.general.ini_file / lineinfile / backup: true)
-# ---------------------------------------------------------------------------
-
-$script:BackedUp = @{}
-function Backup-ConfigFile {
-    param([string]$Path)
-    if ($script:BackedUp.ContainsKey($Path)) { return }
-    if ([IO.File]::Exists($Path)) {
-        [IO.File]::Copy($Path, "$Path.bak.$(Get-Date -Format 'yyyyMMddHHmmss')", $true)
-    }
-    $script:BackedUp[$Path] = $true
-}
-
-$utf8 = New-Object Text.UTF8Encoding $false
-
-function Save-Lines {
-    param([string]$Path, $Lines)
-    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
-    Backup-ConfigFile -Path $Path
-    [IO.File]::WriteAllLines($Path, [string[]]$Lines, $utf8)
-}
-
-function Read-Lines {
-    param([string]$Path)
-    $list = New-Object 'System.Collections.Generic.List[string]'
-    if ([IO.File]::Exists($Path)) { foreach ($l in [IO.File]::ReadAllLines($Path)) { $list.Add($l) } }
-    return ,$list
-}
-
-# "[ Global ]" and "[Global]" are the same section (Supermodel uses spaces).
-function Test-SectionHeader {
-    param([string]$Line, [string]$Section)
-    $t = $Line.Trim()
-    return $t.StartsWith('[') -and $t.EndsWith(']') -and (($t.Substring(1, $t.Length - 2).Trim()) -eq $Section)
-}
-
-function Set-IniValue {
-    param([string]$Path, [string]$Section, [string]$Option, [string]$Value)
-    $lines = Read-Lines -Path $Path
-    $desired = "$Option = $Value"
-
-    $sectionIndex = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if (Test-SectionHeader -Line $lines[$i] -Section $Section) { $sectionIndex = $i; break }
-    }
-    if ($sectionIndex -lt 0) {
-        if ($apply) {
-            if ($lines.Count -gt 0 -and $lines[$lines.Count - 1].Trim() -ne '') { $lines.Add('') }
-            $lines.Add("[$Section]")
-            $lines.Add($desired)
-            Save-Lines -Path $Path -Lines $lines
-        }
-        return $true
-    }
-
-    $sectionEnd = $lines.Count
-    for ($i = $sectionIndex + 1; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].Trim() -match '^\[.+\]$') { $sectionEnd = $i; break }
-    }
-    for ($i = $sectionIndex + 1; $i -lt $sectionEnd; $i++) {
-        if ($lines[$i] -match "^\s*$([regex]::Escape($Option))\s*=\s*(.*)$") {
-            if ($Matches[1].Trim() -eq $Value) { return $false }
-            if ($apply) { $lines[$i] = $desired; Save-Lines -Path $Path -Lines $lines }
-            return $true
-        }
-    }
-    if ($apply) { $lines.Insert($sectionIndex + 1, $desired); Save-Lines -Path $Path -Lines $lines }
-    return $true
-}
-
-function Set-FlatValue {
-    param([string]$Path, [string]$Key, [string]$Value)
-    $lines = Read-Lines -Path $Path
-    $desired = "$Key = $Value"
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match "^\s*$([regex]::Escape($Key))\s*=\s*(.*)$") {
-            if ($Matches[1].Trim() -eq $Value) { return $false }
-            if ($apply) { $lines[$i] = $desired; Save-Lines -Path $Path -Lines $lines }
-            return $true
-        }
-    }
-    if ($apply) { $lines.Add($desired); Save-Lines -Path $Path -Lines $lines }
-    return $true
-}
-
-# Sets the text of <root>/<XPath>, creating missing child elements.
-function Set-XmlValue {
-    param([string]$Path, [string]$XPath, [string]$Value)
-    $doc = New-Object Xml.XmlDocument
-    $doc.PreserveWhitespace = $true
-    $doc.Load($Path)
-    $node = $doc.DocumentElement
-    foreach ($part in $XPath.Split('/')) {
-        $child = $node.SelectSingleNode($part)
-        if (-not $child) { $child = $node.AppendChild($doc.CreateElement($part)) }
-        $node = $child
-    }
-    $onlyText = @($node.ChildNodes | Where-Object { $_.NodeType -ne 'Text' }).Count -eq 0
-    if ($onlyText -and $node.InnerText -eq $Value) { return $false }
-    if ($apply) {
-        $node.InnerText = $Value
-        Backup-ConfigFile -Path $Path
-        $settings = New-Object Xml.XmlWriterSettings
-        $settings.Encoding = $utf8
-        $writer = [Xml.XmlWriter]::Create($Path, $settings)
-        try { $doc.Save($writer) } finally { $writer.Close() }
-    }
-    return $true
-}
+function Backup-ConfigFile { param([string]$Path) Backup-DgFile -Path $Path }
 
 function Invoke-ConfigFile {
     param([string]$Label, [string]$Path, [string]$Format, [array]$Settings, [switch]$CreateIfMissing)
@@ -178,9 +70,9 @@ function Invoke-ConfigFile {
         if ($null -eq $value) { continue }
         $considered++
         $did = switch ($Format) {
-            'ini' { Set-IniValue -Path $Path -Section $s.Section -Option $s.Option -Value $value }
-            'flat' { Set-FlatValue -Path $Path -Key $s.Key -Value $value }
-            'xml' { Set-XmlValue -Path $Path -XPath $s.XPath -Value $value }
+            'ini' { Set-DgIniValue -Path $Path -Section $s.Section -Option $s.Option -Value $value -Apply $apply }
+            'flat' { Set-DgFlatValue -Path $Path -Key $s.Key -Value $value -Apply $apply }
+            'xml' { Set-DgXmlValue -Path $Path -XPath $s.XPath -Value $value -Apply $apply }
             default { throw "unknown format '$Format' for $Label" }
         }
         if ($did) { $changed++ }

@@ -107,6 +107,19 @@
       "notes": "ElSemi's Model 2 Emulator has no official download host or release feed. Extract it so EMULATOR.EXE ends up in <EmulatorsRoot>\\m2emulator\\. configure-emulators.ps1 points its [RomDirs] at your model2 ROM folder. MAME is offered as an alternative emulator for model2 in ES-DE."
     },
     {
+      "id": "edencheats", "name": "Eden Cheats Manager", "role": "tool",
+      "source": "github", "repo": "ChrisA95G/eden-cheats-manager", "assetPattern": "_x64-setup\\.exe$", "installerArgs": "/S /D={dest}", "installDir": "eden-cheats-manager",
+      "exeNames": ["eden-cheats-manager-gui.exe"], "emulatorNames": [], "systems": [],
+      "notes": "Windows build of the Linux install_eden_cheats_manager tool (the Linux role uses its AppImage). Per-user NSIS installer run silently."
+    },
+    {
+      "id": "python", "name": "Python", "role": "tool", "shortcut": false,
+      "source": "url", "versionIndexUrl": "https://www.python.org/ftp/python/", "versionRegex": "href=\"(3\\.\\d+\\.\\d+)/\"", "urlTemplate": "https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip", "probeUrl": true, "installDir": "python",
+      "exeNames": ["python.exe"], "emulatorNames": [], "systems": [],
+      "pipPackages": ["cryptography"],
+      "notes": "Official portable (embeddable) Python, only used by content.ps1 to run the same helper scripts as the Linux roles (PS3/Switch DLC extraction, RPCS3 per-game configs, IPS/BPS ROM patches). extract_ps3_dlc.py needs the cryptography package, so pip is enabled and it is installed from its prebuilt wheel."
+    },
+    {
       "id": "openbor", "name": "OpenBOR", "role": "emulator",
       "source": "github", "repo": "DCurrent/openbor", "assetPattern": "^OpenBOR\\.v.*\\.rar$", "installDir": "OpenBOR",
       "exeNames": ["OpenBOR.exe"], "emulatorNames": [], "systems": ["openbor"],
