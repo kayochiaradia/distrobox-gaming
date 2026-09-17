@@ -42,7 +42,8 @@ foreach ($app in $apps) {
     if ($app.source -eq 'winget') { $ok = $ok -and $app.wingetId }
     if ($app.source -eq 'github') { $ok = $ok -and $app.repo -and $app.assetPattern -and $app.installDir }
     if ($app.source -eq 'gitlab') { $ok = $ok -and $app.project -and $app.assetPattern -and $app.installDir }
-    if ($app.source -eq 'url') { $ok = $ok -and $app.versionIndexUrl -and $app.versionRegex -and $app.urlTemplate -and $app.installDir }
+    if ($app.source -eq 'url') { $ok = $ok -and $app.installDir -and (($app.url -and $app.version) -or ($app.versionIndexUrl -and $app.versionRegex -and $app.urlTemplate)) }
+    if ($app.group) { $ok = $ok -and ($app.group -in 'ports', 'pctools') }
     Assert (-not $app.uac) "apps.json entry '$($app.id)' installs without Administrator rights"
     if ($app.source -eq 'manual') { $ok = $ok -and $app.installDir }
     Assert ([bool]$ok) "apps.json entry '$($app.id)' has the fields its source needs"

@@ -1,26 +1,33 @@
 <#
 .SYNOPSIS
-    Installs (or lists/checks) every emulator in apps.json.
+    Installs (or lists/checks) the emulators, tools and ports in apps.json.
 
 .DESCRIPTION
     Counterpart of the Linux bootstrap_packages/install_* roles and
-    macos/install-apps.sh. Three sources, per apps.json entry:
+    macos/install-apps.sh. Sources, per apps.json entry (all portable, into
+    <EmulatorsRoot>\<installDir>, default %USERPROFILE%\Emulators):
 
-      winget  -- winget install; portable (zip) packages are placed in
-                 <EmulatorsRoot>\<installDir> (default %USERPROFILE%\Emulators)
-      github  -- latest release asset matching assetPattern, extracted with
-                 Windows' built-in tar.exe into <EmulatorsRoot>\<installDir>
+      winget  -- winget portable package
+      github  -- newest release asset matching assetPattern (includePrerelease
+                 for projects that only publish pre-releases)
+      gitlab  -- newest GitLab release link matching assetPattern
+      url     -- newest version found on an index page (e.g. RetroArch buildbot)
       manual  -- the site blocks scripted downloads; prints where to put it
 
-    Already-installed apps are skipped (use -Update to refresh GitHub-sourced
-    ones). Nothing is ever uninstalled.
+    Entries with a "group" (ports, pctools) are optional, like the Linux
+    never-tagged roles: they install only with -Group or -Only.
+    Already-installed apps are skipped (-Update refreshes release-based ones).
+    Nothing is ever uninstalled.
 
 .PARAMETER Only
     Limit to these app ids, e.g. -Only rpcs3,flycast
 
+.PARAMETER Group
+    Also include optional groups, e.g. -Group ports,pctools
+
 .EXAMPLE
     ./install-apps.ps1
-    ./install-apps.ps1 -Check
+    ./install-apps.ps1 -Group ports -List
     ./install-apps.ps1 -Only rpcs3 -Update
 #>
 [CmdletBinding()]
@@ -29,6 +36,7 @@ param(
     [switch]$Check,
     [switch]$Update,
     [string[]]$Only,
+    [string[]]$Group,
     [string]$ConfigPath
 )
 
@@ -43,10 +51,12 @@ $config = Get-DgConfig -ConfigPath $ConfigPath -ScriptRoot $scriptRoot
 $emulatorsRoot = $config.EmulatorsRoot
 $apps = @(Get-DgApps -ScriptRoot $scriptRoot)
 if ($Only) {
-    $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    $unknown = $Only | Where-Object { $_ -notin $apps.id }
-    if ($unknown) { throw "Unknown app id(s): $($unknown -join ', '). Valid: $($apps.id -join ', ')" }
+    $Only = Resolve-DgTags -Values $Only -Allowed $apps.id
     $apps = @($apps | Where-Object { $_.id -in $Only })
+} else {
+    $groups = @($apps | Where-Object { $_.group } | ForEach-Object { $_.group } | Sort-Object -Unique)
+    $Group = if ($Group) { Resolve-DgTags -Values $Group -Allowed $groups } else { @() }
+    $apps = @($apps | Where-Object { -not $_.group -or $_.group -in $Group })
 }
 
 if ($List) {
@@ -131,10 +141,19 @@ function Get-ReleaseArchive {
     param($App)
     switch ($App.source) {
         'github' {
-            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$($App.repo)/releases/latest" -Headers $userAgent
-            $asset = $release.assets | Where-Object { $_.name -match $App.assetPattern } | Select-Object -First 1
-            if (-not $asset) { throw "no asset matching '$($App.assetPattern)' in $($App.repo) release $($release.tag_name)" }
-            return @{ Version = $release.tag_name; Url = $asset.browser_download_url; FileName = $asset.name }
+            # includePrerelease: some projects only publish pre-releases, which
+            # /releases/latest never returns; take the newest release (of any
+            # kind) that has a matching asset.
+            $releases = if ($App.includePrerelease) {
+                @(Invoke-RestMethod -Uri "https://api.github.com/repos/$($App.repo)/releases?per_page=15" -Headers $userAgent)
+            } else {
+                @(Invoke-RestMethod -Uri "https://api.github.com/repos/$($App.repo)/releases/latest" -Headers $userAgent)
+            }
+            foreach ($release in $releases | ForEach-Object { $_ }) {
+                $asset = $release.assets | Where-Object { $_.name -match $App.assetPattern } | Select-Object -First 1
+                if ($asset) { return @{ Version = $release.tag_name; Url = $asset.browser_download_url; FileName = $asset.name } }
+            }
+            throw "no asset matching '$($App.assetPattern)' in $($App.repo) releases"
         }
         'gitlab' {
             $project = [Uri]::EscapeDataString($App.project)
@@ -144,7 +163,10 @@ function Get-ReleaseArchive {
             return @{ Version = $release.tag_name; Url = $link.url; FileName = $link.name }
         }
         'url' {
-            $index = (Invoke-WebRequest -Uri $App.versionIndexUrl -UseBasicParsing -Headers $userAgent).Content
+            if ($App.url) {
+                return @{ Version = $App.version; Url = $App.url; FileName = [IO.Path]::GetFileName(([Uri]$App.url).AbsolutePath) }
+            }
+            $index =(Invoke-WebRequest -Uri $App.versionIndexUrl -UseBasicParsing -Headers $userAgent).Content
             $versions = @([regex]::Matches($index, $App.versionRegex) | ForEach-Object { [version]$_.Groups[1].Value } | Sort-Object -Descending)
             if (-not $versions) { throw "no version matching '$($App.versionRegex)' at $($App.versionIndexUrl)" }
             # probeUrl: index folders can exist before their files (pre-releases),
@@ -183,6 +205,10 @@ function Install-FromArchive {
             $argList = $App.installerArgs.Replace('{dest}', $dest)
             $proc = Start-Process -FilePath $tmp -ArgumentList $argList -Wait -PassThru
             if ($proc.ExitCode -ne 0) { throw "installer exited with code $($proc.ExitCode)" }
+        } elseif ($archive.FileName -like '*.exe') {
+            # A single portable executable.
+            [void][IO.Directory]::CreateDirectory($dest)
+            [IO.File]::Copy($tmp, (Join-Path $dest $archive.FileName), $true)
         } else {
             Expand-DgArchive -Path $tmp -Destination $dest
         }

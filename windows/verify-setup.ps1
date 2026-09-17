@@ -42,6 +42,7 @@ $installed = @{}
 foreach ($app in $apps) {
     $exe = Resolve-AppRealExePath -App $app -EmulatorsRoot $config.EmulatorsRoot
     if ($exe) { $installed[$app.id] = $exe; Pass "$($app.name): $exe" }
+    elseif ($app.group) { continue }
     elseif ($app.source -eq 'manual') { Warn "$($app.name) not installed (manual download, see INSTALL.md)" }
     else { Fail "$($app.name) not installed -- run ./install-apps.ps1 -Only $($app.id)" }
 }

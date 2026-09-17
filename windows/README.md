@@ -44,9 +44,11 @@ Pocket, MSX, Odyssey 2, 3DO, WonderSwan, Virtual Boy, SuperGrafx, Vectrex,
 Neo Geo CD, Amiga, C64); ES-DE's bundled Windows configuration already has
 systems for those.
 
-Out of scope, as in `macos/`: the Linux tree's per-game PC mod sets, recomp
-and decomp ports, Wine game wrappers and mod managers. On Windows those games
-and tools run natively and install through their own installers.
+Beyond emulation, the Linux tree's optional extras are covered too: DLC,
+cheats, per-game tuning, romhacks and HD textures ([Optional
+content](#optional-content)), and its native ports, recomps, fan games and mod
+tools ([Ports, recomps and PC tools](#ports-recomps-and-pc-tools)). Its
+per-game NexusMods mod sets are not ported yet.
 
 ## Install and configure
 
@@ -106,6 +108,78 @@ installed by `install-apps.ps1` from its Windows build.
 Not ported: `install_smm2_levels` (needs its Rust injector built with a Rust
 toolchain) and `steam_trainers`/`install_cheatengine` (Proton prefix tooling;
 on Windows, trainers and Cheat Engine run natively).
+
+### Ports, recomps and PC tools
+
+The Linux `install_*` roles for native ports, recompilations, fan games and
+mod tools, as two optional groups in [apps.json](apps.json) -- like the
+never-tagged Linux roles they only install on request:
+
+```powershell
+./install-apps.ps1 -Group ports            # games
+./install-apps.ps1 -Group pctools          # mod managers and tools
+./install-apps.ps1 -Only soh,sonic3air     # or pick some
+./install-shortcuts.ps1 -Action Configure  # Start Menu entries for them
+```
+
+Every entry is the project's official Windows build. Several Linux roles run
+these under Wine or build them from source; here they are simply the Windows
+release. ROMs and game files are never supplied: each port's first run asks
+for (or documents where to put) your own copy, as noted below.
+
+| App | Id | Source | Notes |
+|---|---|---|---|
+| Ship of Harkinian | `soh` | GitHub `HarbourMasters/Shipwright` | Ocarina of Time PC port (Linux install_ship_of_harkinian). First launch asks for your OoT ROM and builds oot.o2r. |
+| 2 Ship 2 Harkinian | `2s2h` | GitHub `HarbourMasters/2ship2harkinian` | Majora's Mask PC port. First launch asks for your MM ROM. |
+| Starship | `starship` | GitHub `HarbourMasters/Starship` | Star Fox 64 PC port. First launch extracts assets from your Star Fox 64 (USA) (Rev A) ROM. |
+| SpaghettiKart | `spaghettikart` | GitHub `HarbourMasters/SpaghettiKart` | Mario Kart 64 PC port. First launch asks for your MK64 ROM. |
+| Banjo-Kazooie Recompiled | `banjorecomp` | GitHub `BanjoRecomp/BanjoRecomp` | N64Recomp port. Select your Banjo-Kazooie (USA) ROM in its launcher. |
+| Donkey Kong 64 Recompiled | `dk64recomp` | GitHub `Rainchus/Donkey-Kong-64-Recompiled` | N64Recomp port. Select your Donkey Kong 64 (USA) ROM in its launcher. |
+| Wave Race 64 Recompiled | `waverace` | GitHub `elliotttate/wave-race-64-recomp` | N64Recomp port (runs under Wine on Linux, native here). Select your Wave Race 64 (USA) (Rev A) ROM. |
+| Metroid Prime Hunters Recomp | `mphrecomp` | GitHub `mstan/MetroidPrimeHuntersRecomp` | Needs your Metroid Prime - Hunters (USA) ROM. |
+| Perfect Dark | `perfectdark` | GitHub `DabDavis/perfect-dark-dabs-mod` | Perfect Dark PC port. Put your Perfect Dark (USA) (Rev A) ROM in its data folder as pd.ntsc-final.z64. |
+| Donkey Kong Country Recomp | `dkc1recomp` | GitHub `elliotttate/DKC1Recomp` | SNES recomp; needs the USA v1.0 ROM. Linux builds it from source with its own patches; upstream ships Windows builds. |
+| Donkey Kong Country 2 Recomp | `dkc2recomp` | GitHub `elliotttate/DKC2Recomp` | SNES recomp; needs the USA v1.0 ROM. |
+| Donkey Kong Country 3 Recomp | `dkc3recomp` | GitHub `elliotttate/DKC3Recomp` | SNES recomp; needs the USA ROM. |
+| Super Mario Bros. Remastered | `smbremastered` | GitHub `JHDev2006/Super-Mario-Bros.-Remastered-Public` | Godot remake; asks for your Super Mario Bros. ROM on first launch. |
+| Super Mario World Remastered | `smwremastered` | GitHub `JHDev2006/Super-Mario-World-Remastered-Public` | Godot remake; asks for your Super Mario World (USA) ROM on first launch. |
+| Sonic 3 A.I.R. | `sonic3air` | GitHub `Eukaryot/sonic3air` | Asks for your Sonic 3 & Knuckles ROM on first launch. |
+| Sonic 2 (2013) - RSDKv4 | `sonic2013` | GitHub `RSDKModding/RSDKv4-Decompilation` | RSDKv4 decompilation; copy your Sonic 2 (2013) Data.rsdk next to the exe. The Linux Sonic 2 Mania mod goes in its mods folder. |
+| Cannonball DX (OutRun) | `cannonball` | GitHub `Endprodukt/cannonball-dx` | OutRun engine; put your OutRun MAME romset files in its roms folder. |
+| DUDE (Doom 3) | `dude` | GitHub `Inkub0/dude` | Doom 3 source port; needs your Doom 3 game files. |
+| Dusk (Twilight Princess) | `dusk` | GitHub `TwilitRealm/dusk` | Twilight Princess PC port; select your GameCube disc image in its launcher. |
+| Unleashed Recompiled | `unleashedrecomp` | GitHub `hedge-dev/UnleashedRecomp` | Its first-run installer asks for your Sonic Unleashed (Xbox 360) game files and title update. |
+| Star Fox Enhanced | `starfoxenhanced` | GitHub `kandowontu/starfox-enhanced` | SNES Star Fox source port; builds assets from your Star Fox (USA) (Rev 2) ROM on first launch. |
+| TriAevum | `triaevum` | GitHub `coccofresco/TriAevum` | Ocarina of Time 3D PC port (Wine on Linux, native here); TriAevumForge extracts your OoT3D ROM. |
+| WipEout Phantom Edition | `wipeoutpe` | GitHub `wipeout-phantom-edition/wipeout-phantom-edition` | Needs the original WipEout PC/PS1 data files (see docs/wipeout-pe.md). |
+| G-Diffuser (F-Zero X) | `gdiffuser` | GitHub `Zorkats/G-Diffuser` | F-Zero X port; needs your F-Zero X ROM (plus the Expansion Kit disk and 64DD IPL for the Expansion Kit). |
+| PrBoom+ RT (Doom II Ray Traced) | `prboomrt` | GitHub `sultim-t/prboom-plus-rt` | Ray-traced Doom; copy your doom2.wad next to the exe. |
+| Virtua Racing (Wanszai) | `virtuaracing` | GitHub `wanszai/Virtua-Racing---XBOXONE-Windows` | Model 1 frontend (Wine on Linux, native here); put vr.zip in its roms folder. |
+| Virtua Fighter (Wanszai) | `virtuafighter` | GitHub `wanszai/Virtua-Fighter---XboxOne-Windows` | Model 1 frontend; put vf.zip in its roms folder. |
+| Ridge Racer Collection (Wanszai) | `ridgeracer` | GitHub `wanszai/Ridge-Racer-Collection` | System 22 frontend (Ridge Racer, RR2, Rave Racer); put the MAME romsets in its roms folder. |
+| Sega Rally HD (Wanszai) | `segarally` | GitHub `wanszai/Sega-Rally-Championship-PC-Xbox360-Series-X-` | Model 2 Sega Rally frontend; put srallyc.zip in its roms folder. |
+| Streets of Rage Remake | `sorr` | archive.org | Windows fan game (Wine on Linux, native here), same archive.org source as the Linux role. |
+| Sonic P-06 | `sonicp06` | **manual** | Project 06 Silver Release has no scripted download; extract it so "Sonic the Hedgehog.exe" is in %USERPROFILE%\Emulators\sonic-p06. |
+| Sonic SMS Remake | `sonicsms` | **manual** | No scripted download; extract v1.9 so "Sonic SMS Remake.exe" is in %USERPROFILE%\Emulators\sonic-sms-remake. |
+| DKLR | `dklr` | **manual** | No scripted download; extract it so DKLR.exe is in %USERPROFILE%\Emulators\dklr. |
+| Parallel Launcher | `parallellauncher` | **manual** | Its GitLab releases carry no files; install from the official site. Also the n64 alternative emulator in ES-DE. |
+| Hedge Mod Manager | `hedgemodmanager` | GitHub `hedge-dev/HedgeModManager` | Sonic mod manager (Linux builds it from source; the Windows release is a single exe). |
+| Xenia Manager | `xeniamanager` | GitHub `xenia-manager/xenia-manager` | Per-game Xenia configs and title updates (Linux install_xenia runs it under Wine). Xenia Canary itself is installed as a core emulator. |
+| Overstrike | `overstrike` | GitHub `Tkachov/Overstrike` | Marvel's Spider-Man mod manager (Linux install_modtools). |
+| Ryu Mod Manager | `ryumodmanager` | GitHub `mosamadeeb/RyuModManager` | Yakuza mod manager (Linux install_modtools). |
+| SnakeBite | `snakebite` | **manual** | MGSV mod manager (Linux install_modtools); its interactive installer must be run by hand. |
+| DOSBox Staging | `dosbox` | GitHub `dosbox-staging/dosbox-staging` | For the Screamer DOS games (Linux install_screamer); point it at your own game copies. |
+| Cheat Engine | `cheatengine` | **manual** | Linux install_cheatengine; the official installer bundles offers, so install it by hand. |
+
+Not automated on Windows: **GoldenEye 64 Recompiled** (upstream only publishes
+a macOS build; the Linux role compiles it), **Render96ex** (no releases; the
+Linux role compiles it with its model/texture packs), **Project Reignition**
+and **Mega Man X Regenesis** (distributed via Game Jolt/itch.io, staged by hand
+on Linux too). The Linux ROM staging for ports (copying ROMs into each port's
+folder under fixed names) is not ported; the notes above say how each port
+takes its ROM, based on the projects' documentation -- not yet tried here.
+Checked on 2026-09-17: every automated entry downloaded, extracted and was
+detected on Windows 11; none has been launched yet.
 
 ### Maintenance
 

@@ -55,7 +55,7 @@ foreach ($app in Get-DgApps -ScriptRoot $scriptRoot) {
 
     $lnk = Join-Path $ShortcutsDir "$($app.name).lnk"
     $wanted[$lnk] = $true
-    $description = if ($app.role -eq 'frontend') { 'Emulator frontend' } elseif ($app.role -eq 'tool') { $app.name } else {
+    $description = if ($app.role -eq 'frontend') { 'Emulator frontend' } elseif ($app.role -in 'tool', 'port') { $app.name } else {
         $names = @($app.systems | ForEach-Object { if ($systemNames.ContainsKey($_)) { $systemNames[$_] } else { $_ } })
         if ($names.Count -gt 4) { "$($names[0..3] -join ', ') and $($names.Count - 4) more" } else { $names -join ', ' }
     }

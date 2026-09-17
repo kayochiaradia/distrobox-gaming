@@ -92,6 +92,11 @@ Wine. Plain PowerShell 5.1 scripts, each with a preview mode:
   `config/retroarch-cores.psd1` extras, and the 8 asset packs, from the
   libretro buildbot.
 - `install-shortcuts.ps1` — counterpart of `desktop_apps`: Start Menu shortcuts.
+- Ports, recomps, fan games and mod tools (the non-mod `install_*` roles) are
+  `apps.json` entries with `group` `ports` or `pctools`, installed only via
+  `install-apps.ps1 -Group`/`-Only`. Use each project's official Windows
+  release even where the Linux role builds from source or runs it under Wine;
+  confirm `exeNames` against the extracted release, never guess them.
 - `content.ps1 -Tags ...` — the never-tagged content roles (install_dlcs,
   switch_cheats, rpcs3_per_game_configs, pcsx2_textures, install_rom_patches,
   install_hd_textures), data in `config/content.psd1`. It runs the Linux
