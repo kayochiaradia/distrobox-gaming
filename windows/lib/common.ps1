@@ -111,6 +111,7 @@ function Resolve-DgTags {
 #   {{BiosRoot}}        BiosRoot
 #   {{RomRoot}}         RomRoot
 #   {{RomPath:<sys>}}   RomPaths override or RomRoot\<sys>
+#   {{RomDirName:<sys>}} leaf folder name of that ROM path
 $script:DgAppDirCache = @{}
 function Get-DgAppDir {
     param([string]$Id, $Config, $Apps)
@@ -138,6 +139,9 @@ function Expand-DgTokens {
     }
     foreach ($m in [regex]::Matches($out, '\{\{RomPath:([a-z0-9]+)\}\}')) {
         $out = $out.Replace($m.Value, (Get-DgRomPath -System $m.Groups[1].Value -Config $Config))
+    }
+    foreach ($m in [regex]::Matches($out, '\{\{RomDirName:([a-z0-9]+)\}\}')) {
+        $out = $out.Replace($m.Value, [IO.Path]::GetFileName((Get-DgRomPath -System $m.Groups[1].Value -Config $Config).TrimEnd('\')))
     }
     $out = $out.Replace('{{BiosRoot}}', $Config.BiosRoot).Replace('{{RomRoot}}', $Config.RomRoot).Replace('{esdehome}', $Config.EsdeHome)
     if ($ScriptRoot) { $out = $out.Replace('{scriptroot}', $ScriptRoot).Replace('{reporoot}', (Split-Path -Parent $ScriptRoot)) }

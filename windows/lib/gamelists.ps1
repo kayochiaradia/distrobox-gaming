@@ -150,6 +150,55 @@ function Update-ArcadeCloneGamelist {
     }
 }
 
+# Sets <altemulator> in an ES-DE gamelist for every ROM under
+# <RomDir>\<Folder> whose file name matches Pattern, keeping everything else
+# ES-DE or the user wrote. Replaces Linux launcher wrappers that picked a
+# different core per game (bin/retroarch-snes). Returns $null when no ROM
+# matches.
+function Update-AltEmulatorGamelist {
+    param([string]$RomDir, [string]$OutFile, [array]$Rules, [string]$Extensions, [bool]$Apply)
+    $exts = @($Extensions -split '\s+' | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+    $matched = @()
+    foreach ($rule in $Rules) {
+        $dir = if ($rule.Folder) { Join-Path $RomDir $rule.Folder } else { $RomDir }
+        if (-not [IO.Directory]::Exists($dir)) { continue }
+        foreach ($file in [IO.Directory]::GetFiles($dir, '*', [IO.SearchOption]::AllDirectories)) {
+            $leaf = [IO.Path]::GetFileName($file)
+            if ([IO.Path]::GetExtension($leaf).ToLowerInvariant() -notin $exts) { continue }
+            if ($leaf -notmatch $rule.Pattern) { continue }
+            $rel = './' + $file.Substring($RomDir.TrimEnd('\').Length + 1).Replace('\', '/')
+            $matched += [PSCustomObject]@{ Path = $rel; Name = [IO.Path]::GetFileNameWithoutExtension($leaf); Label = $rule.Label }
+        }
+    }
+    if (-not $matched) { return $null }
+
+    $doc = New-Object Xml.XmlDocument
+    if ([IO.File]::Exists($OutFile)) {
+        $doc.Load($OutFile)
+    } else {
+        [void]$doc.AppendChild($doc.CreateXmlDeclaration('1.0', 'UTF-8', $null))
+        [void]$doc.AppendChild($doc.CreateElement('gameList'))
+    }
+    $list = $doc.SelectSingleNode('/gameList')
+    foreach ($m in $matched) {
+        $game = $null
+        foreach ($g in $list.SelectNodes('game')) {
+            if ("$($g.path)".Trim() -ceq $m.Path) { $game = $g; break }
+        }
+        if (-not $game) {
+            $game = $list.AppendChild($doc.CreateElement('game'))
+            Add-XmlChild $game 'path' $m.Path
+            Add-XmlChild $game 'name' $m.Name
+        }
+        $alt = $game.SelectSingleNode('altemulator')
+        if ($alt) { $alt.InnerText = $m.Label } else { Add-XmlChild $game 'altemulator' $m.Label }
+    }
+    return [PSCustomObject]@{
+        Changed = (Write-XmlIfChanged -Path $OutFile -Document $doc -Apply $Apply)
+        Games   = $matched.Count
+    }
+}
+
 # Bridges Skraper/EmuDeck scraped art into ES-DE's downloaded_media layout.
 # Port of media-symlinks.yml: hierarchical <rom>\media\<type>\ first, then
 # Skraper-flat <rom>\images\<rom>-image|-marquee.*; first writer wins.

@@ -191,6 +191,48 @@ finally {
 }
 
 # ---------------------------------------------------------------------------
+# Per-game emulator (AltEmulators, port of bin/retroarch-snes)
+# ---------------------------------------------------------------------------
+
+$esdeData = Import-PowerShellDataFile -Path (Join-Path $windowsRoot 'config\esde-systems.psd1')
+foreach ($rule in $esdeData.AltEmulators) {
+    $sysDef = $systems | Where-Object { $_.Name -eq $rule.System }
+    Assert ($rule.Label -in @($sysDef.Commands.Label)) "AltEmulators label '$($rule.Label)' is a command of system '$($rule.System)'"
+}
+
+$ae = New-TempDir
+try {
+    . (Join-Path $windowsRoot 'lib\gamelists.ps1')
+    $aeRoms = Join-Path $ae 'snes'
+    New-Item -ItemType Directory -Path (Join-Path $aeRoms 'no_match') -Force | Out-Null
+    foreach ($n in 'no_match\SMW Widescreen v1.2.sfc', 'no_match\SMW Widescreen v1.2.bso', 'no_match\Other Hack.sfc', 'Super Mario World Widescreen.sfc') {
+        Set-Content -Path (Join-Path $aeRoms $n) -Value 'rom'
+    }
+    $aeList = Join-Path $ae 'gamelists\snes\gamelist.xml'
+    New-Item -ItemType Directory -Path (Split-Path $aeList) -Force | Out-Null
+    Set-Content -Path $aeList -Encoding UTF8 -Value @('<?xml version="1.0"?>', '<gameList>',
+        '<game><path>./Zelda.sfc</path><name>Zelda</name><rating>0.9</rating></game>', '</gameList>')
+    $snesDef = $systems | Where-Object { $_.Name -eq 'snes' }
+    $snesRules = @($esdeData.AltEmulators | Where-Object { $_.System -eq 'snes' })
+
+    $r = Update-AltEmulatorGamelist -RomDir $aeRoms -OutFile $aeList -Rules $snesRules -Extensions $snesDef.Extension -Apply $false
+    Assert ($r.Changed -and -not ((Get-Content -Raw $aeList) -match 'altemulator')) 'AltEmulators preview writes nothing'
+    $r = Update-AltEmulatorGamelist -RomDir $aeRoms -OutFile $aeList -Rules $snesRules -Extensions $snesDef.Extension -Apply $true
+    [xml]$aeXml = Get-Content -Raw $aeList
+    $alts = @($aeXml.gameList.game | Where-Object { $_.altemulator } | ForEach-Object { $_.path })
+    Assert ($r.Games -eq 1 -and ($alts -join ',') -eq './no_match/SMW Widescreen v1.2.sfc') 'only the SMW widescreen ROM in no_match gets bsnes-hd (not the .bso, other hacks or other folders)'
+    Assert (($aeXml.gameList.game | Where-Object { $_.path -eq './Zelda.sfc' }).rating -eq '0.9') 'existing gamelist entries are preserved'
+    $r = Update-AltEmulatorGamelist -RomDir $aeRoms -OutFile $aeList -Rules $snesRules -Extensions $snesDef.Extension -Apply $true
+    Assert (-not $r.Changed) 're-running AltEmulators is idempotent'
+    $none = Update-AltEmulatorGamelist -RomDir (Join-Path $ae 'missing') -OutFile $aeList -Rules $snesRules -Extensions $snesDef.Extension -Apply $true
+    Assert ($null -eq $none) 'AltEmulators skips a system with no matching ROMs'
+}
+catch { Assert $false "test section crashed: $($_.Exception.Message)" }
+finally {
+    Remove-Item -Path $ae -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
 # install-cores.ps1 -Check (no network)
 # ---------------------------------------------------------------------------
 
@@ -454,6 +496,7 @@ Set-Content -Path $fxConfig -Encoding UTF8 -Value @"
 @{
     BiosRoot = '$fxBios'
     RomRoot = '$fxRoms'
+    RomPaths = @{ atari800 = '$fx\Atari 8-bit\' }
     EmulatorsRoot = '$fxEmu'
     PreferDiscreteGpu = `$false
     EmulatorConfigPaths = @{
@@ -485,6 +528,9 @@ try {
     Assert ((Get-Content $fxRetro) -contains 'video_driver = "d3d11"') 'Configure leaves unmanaged retroarch.cfg keys alone'
     Assert (Test-Path (Join-Path $fx 'RetroArch-Win64\config\melonDS\melonDS.cfg')) 'Configure creates RetroArch core option files next to retroarch.cfg'
     Assert ((Get-Content (Join-Path $fx 'RetroArch-Win64\config\ParaLLEl N64\ParaLLEl N64.cfg')) -contains 'video_driver = "vulkan"') 'ParaLLEl-N64 gets a per-core Vulkan driver override'
+    $opt5200 = Get-Content (Join-Path $fx 'RetroArch-Win64\config\Atari800\atari5200.opt')
+    Assert (($opt5200 -contains 'atari800_system = "5200"') -and ($opt5200 -contains 'atari800_os_5200 = "AltirraOS"') -and -not ($opt5200 -match '"Original"')) 'Atari 5200 folder options force 5200 mode with the built-in OS when 5200.ROM is missing'
+    Assert ((Get-Content (Join-Path $fx 'RetroArch-Win64\config\Atari800\Atari 8-bit.opt')) -contains 'atari800_system = "800XL (64K)"') 'Atari 8-bit folder options follow a RomPaths folder name ({{RomDirName}})'
     Assert (-not (Test-Path $fxPcsx2)) 'Configure never creates a config file the emulator has not written yet (PCSX2)'
     Assert (@(Get-ChildItem (Split-Path $fxDuck) -Filter 'settings.ini.bak.*').Count -eq 1) 'Configure backs up a changed file once'
 

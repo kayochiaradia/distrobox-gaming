@@ -160,6 +160,15 @@ foreach ($sys in $esdeData.ArcadeCloneSystems) {
     else { Write-Host "[$sys] $($r.Games) game(s), $($r.Hidden) clone(s) hidden, $(if ($r.Changed) { $verb } else { 'up to date' })" -ForegroundColor $(if ($r.Changed) { 'Yellow' } else { 'Green' }) }
 }
 
+foreach ($group in @($esdeData.AltEmulators) | Where-Object { $_ } | Group-Object System) {
+    $sys = $group.Name
+    $def = $systems | Where-Object { $_.Name -eq $sys }
+    $r = Update-AltEmulatorGamelist -RomDir (Get-RomPath -System $sys) -OutFile (Join-Path $gamelistDir "$sys\gamelist.xml") `
+        -Rules $group.Group -Extensions $def.Extension -Apply $apply
+    if ($null -eq $r) { Write-Host "[$sys] no ROMs that need a per-game emulator" -ForegroundColor DarkGray }
+    else { Write-Host "[$sys] per-game emulator on $($r.Games) game(s) $(if ($r.Changed) { $verb } else { 'up to date' })" -ForegroundColor $(if ($r.Changed) { 'Yellow' } else { 'Green' }) }
+}
+
 $romDirs = @{}
 foreach ($s in $systems) {
     $d = Get-RomPath -System $s.Name

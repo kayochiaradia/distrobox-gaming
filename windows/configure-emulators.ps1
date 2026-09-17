@@ -65,6 +65,7 @@ function Invoke-ConfigFile {
     $changed = 0; $considered = 0
     foreach ($s in $Settings) {
         if ($s.Requires -and -not [IO.File]::Exists((Join-Path $config.BiosRoot $s.Requires))) { continue }
+        if ($s.UnlessBios -and [IO.File]::Exists((Join-Path $config.BiosRoot $s.UnlessBios))) { continue }
         if ($s.Value -like '*{{BiosRoot}}*' -and -not [IO.Directory]::Exists($config.BiosRoot)) { continue }
         $value = Expand-Tokens -Text $s.Value
         if ($null -eq $value) { continue }
@@ -152,7 +153,7 @@ if ($resolvedPaths.ContainsKey('retroarch') -and [IO.File]::Exists($resolvedPath
     $retroConfigDir = Join-Path (Split-Path -Parent $resolvedPaths.retroarch) 'config'
     foreach ($core in $emu.RetroarchCoreOptions) {
         Invoke-ConfigFile -Label 'retroarch core' -Format 'flat' -CreateIfMissing `
-            -Path (Join-Path $retroConfigDir $core.RelativePath) -Settings $core.Settings
+            -Path (Join-Path $retroConfigDir (Expand-Tokens -Text $core.RelativePath)) -Settings $core.Settings
     }
 }
 

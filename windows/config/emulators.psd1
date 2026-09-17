@@ -226,6 +226,25 @@
         # renderer below needs Vulkan (Linux used vulkan globally).
         @{ RelativePath = 'ParaLLEl N64\ParaLLEl N64.cfg'
            Settings = @( @{ Key = 'video_driver'; Value = '"vulkan"' } ) }
+        # Atari 5200 vs 8-bit on the one atari800 core. Linux rewrites
+        # atari800_system before every launch (bin/retroarch-atari800) because
+        # the core only ever forces 5200 mode ON. RetroArch natively loads
+        # config\<core>\<ROM folder name>.opt for every game in that folder
+        # (runloop.c validate_folder_options), so one file per ROM folder does
+        # the same with no wrapper. ROMs in subfolders of these folders use the
+        # subfolder's name instead. 5200 uses the real BIOS when present, else
+        # the core's built-in AltirraOS, as the Linux wrapper does. With the
+        # default folder name, atari800.opt is also the core-wide Atari800.opt
+        # (case-insensitive paths), so 800XL becomes the fallback everywhere,
+        # which matches the wrapper's default. .a52 carts still self-switch.
+        @{ RelativePath = 'Atari800\{{RomDirName:atari5200}}.opt'
+           Settings = @(
+               @{ Key = 'atari800_system'; Value = '"5200"' }
+               @{ Key = 'atari800_os_5200'; Value = '"Original"'; Requires = '5200.ROM' }
+               @{ Key = 'atari800_os_5200'; Value = '"AltirraOS"'; UnlessBios = '5200.ROM' }
+           ) }
+        @{ RelativePath = 'Atari800\{{RomDirName:atari800}}.opt'
+           Settings = @( @{ Key = 'atari800_system'; Value = '"800XL (64K)"' } ) }
         @{ RelativePath = 'ParaLLEl N64\ParaLLEl N64.opt'
            Settings = @(
                @{ Key = 'parallel-n64-gfxplugin'; Value = '"parallel"' }

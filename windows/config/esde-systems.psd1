@@ -6,9 +6,9 @@
     #
     # Launch syntax follows ES-DE's bundled Windows es_systems.xml; the first
     # command is the default, matching the Linux choice. Linux-only wrapper
-    # scripts (retroarch-snes auto-picker, retroarch-atari800 mode switch,
-    # flycast-hires/gamescope, Wine launchers, xenia .xbla stubs) have no
-    # Windows equivalent and are replaced by the plain emulator command.
+    # scripts (flycast-hires/gamescope, Wine launchers, xenia .xbla stubs)
+    # are replaced by the plain emulator command; retroarch-snes becomes
+    # AltEmulators below and retroarch-atari800 RetroArch folder options.
     #
     # Not expanded as %VAR% on load -- %ROM%, %EMULATOR_X% etc. are ES-DE
     # variables.
@@ -17,6 +17,15 @@
     # bootstrap.ps1 generates the ES-DE gamelist with clone sets hidden
     # (Linux dg_esde_arcade_clone_systems).
     ArcadeCloneSystems = @('model1', 'model2', 'model3')
+
+    # Per-game emulator, written as <altemulator> into the ES-DE gamelist for
+    # ROMs under <system ROM dir>\<Folder> whose file name matches Pattern
+    # (regex). Label must be one of that system's command labels. Port of
+    # bin/retroarch-snes: Vitor Vilela's SMW widescreen hack needs bsnes-hd.
+    AltEmulators = @(
+        @{ System = 'snes'; Folder = 'no_match'; Pattern = '(?i)smw.*widescreen|super.*mario.*world.*widescreen'
+           Label = 'bsnes-hd beta (RetroArch)' }
+    )
 
     Systems = @(
         @{ Name = 'switch'; FullName = 'Nintendo Switch'; Platform = 'switch'; Theme = 'switch'
@@ -241,9 +250,9 @@
            Commands = @( @{ Label = 'Stella (RetroArch)'; Cmd = '%EMULATOR_RETROARCH% -L %CORE_RETROARCH%\stella_libretro.dll %ROM%' } ) }
 
         # The atari800 core only auto-switches INTO 5200 mode (for carts it
-        # recognises); the Linux retroarch-atari800 wrapper that switches it
-        # back per launch is not ported. Set atari800_system per content
-        # directory in RetroArch if 5200 and 8-bit games cross-contaminate.
+        # recognises). Instead of the Linux retroarch-atari800 wrapper,
+        # configure-emulators.ps1 writes RetroArch folder options
+        # (config\Atari800\<ROM folder>.opt) fixing atari800_system per system.
         @{ Name = 'atari5200'; FullName = 'Atari 5200'; Platform = 'atari5200'; Theme = 'atari5200'
            Extension = '.a52 .A52 .bin .BIN .car .CAR .rom .ROM .zip .ZIP .7z .7Z'
            Commands = @( @{ Label = 'Atari800 (RetroArch)'; Cmd = '%EMULATOR_RETROARCH% -L %CORE_RETROARCH%\atari800_libretro.dll %ROM%' } ) }
