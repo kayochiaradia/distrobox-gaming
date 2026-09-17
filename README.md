@@ -28,6 +28,17 @@ with the Linux tree: no Distrobox, no Wine/Proton, no `.so` cores. Windows
 software is permanently out of its scope. See [macos/README.md](macos/README.md)
 and [macos/INSTALL.md](macos/INSTALL.md).
 
+## Windows
+
+`windows/` is a separate, native Windows 10/11 baseline — ES-DE plus Dolphin,
+PCSX2, DuckStation, PPSSPP and RetroArch, installed via `winget` and driven by
+PowerShell scripts (no Ansible control node, no Distrobox, no WSL). It shares
+no code with the Linux tree or with `macos/`. ES-DE already ships a complete
+Windows `es_systems.xml`, so unlike the other two stacks there is no XML to
+generate — the scripts install the apps and wire each one up so ES-DE can
+find it. See [windows/README.md](windows/README.md) and
+[windows/INSTALL.md](windows/INSTALL.md).
+
 Everything else in this file describes the Linux distrobox.
 
 ## Quick Start

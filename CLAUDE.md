@@ -75,6 +75,25 @@ Its integration test is `python3 macos/tests/verify.py`, which runs real
 Ansible in temporary directories and installs nothing. Do not fold macOS
 concerns into the Linux roles, or vice versa. See `macos/README.md`.
 
+### Windows (`windows/`, separate stack)
+
+`windows/` is a native Windows 10/11 baseline that shares **no** code with the
+Linux tree or with `macos/`. No Ansible (there is no supported Ansible
+control node on Windows), no Distrobox, no WSL, no Wine/Proton — Windows
+games just run, so nothing from the Linux Wine/mod-manager roles is
+reproduced. Orchestration is plain PowerShell: `windows/install-apps.ps1`
+installs `windows/apps.json`'s app list via `winget` (ES-DE, Dolphin, PCSX2,
+DuckStation, PPSSPP, RetroArch), and `windows/bootstrap.ps1 {Check,Configure}`
+verifies/wires up emulator discovery and ROM directory layout. Unlike the
+Linux tree and `macos/`, there is no custom `es_systems.xml` to render — ES-DE
+already ships a complete one for Windows; `bootstrap.ps1` only creates a
+directory junction under `<EsdeHome>\Emulators\<name>\` for emulators ES-DE's
+own find-rules (PATH/registry) can't already see. Its integration test is
+`pwsh windows/tests/verify.ps1`, which runs the real script against a
+temporary sandbox directory and never calls `winget` or touches the user's
+actual ES-DE install. Do not fold Windows concerns into the Linux roles or
+the macOS scripts, or vice versa. See `windows/README.md`.
+
 ### Helper scripts and config sources
 
 `scripts/` holds helper scripts invoked **by the Ansible roles** — `install-host-launchers.sh` (host `.desktop` export, used by `desktop_apps` and several game roles), the `set-*.py` Steam/INI helpers (`metal_gear`, `steam_lib32_nvidia`, `steam_trainers`), `sync-emulator-cheats.py`, and a couple of download utilities. `config/` holds the live config **source trees** (emulator INIs, ES-DE, Steam vdfs, `config/desktop/` templates) that `seed_configs` and related roles copy into the box. Neither directory is a standalone interface — the roles drive them.
